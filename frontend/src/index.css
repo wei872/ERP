@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+/* ═══════════════════════════════════════════════════════════════
+   ERP 设计系统 — 全局基础层
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 字体 ── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  /* 品牌渐变 */
+  --brand-from: #6366f1;
+  --brand-to: #8b5cf6;
+
+  /* 阴影层次 */
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.07), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.08), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.04);
+  --shadow-brand: 0 8px 25px -5px rgb(99 102 241 / 0.35);
+}
+
+/* ── 基础重置 ── */
+* { box-sizing: border-box; }
+html { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body { margin: 0; background: #f8fafc; color: #1e293b; letter-spacing: -0.005em; }
+
+/* ── 自定义滚动条 ── */
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.3); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.55); }
+
+/* ── 选中文字 ── */
+::selection { background: rgb(99 102 241 / 0.18); color: #4338ca; }
+
+/* ── 数字等宽 ── */
+.font-mono, .tabular-nums { font-variant-numeric: tabular-nums; }
+
+/* ═══════════════════════════════════════════════════════════════
+   可复用组件类 — 一致性优先
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 卡片 ── */
+.erp-card {
+  background: #fff;
+  border: 1px solid rgb(226 232 240 / 0.8);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.erp-card-hover:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+/* ── 按钮 ── */
+.erp-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  font-weight: 500; font-size: .8125rem; line-height: 1;
+  padding: .625rem 1.125rem; border-radius: .625rem;
+  transition: all .18s cubic-bezier(.4,0,.2,1);
+  cursor: pointer; white-space: nowrap; border: none;
+}
+.erp-btn:active { transform: scale(.97); }
+.erp-btn:disabled { opacity: .45; cursor: not-allowed; }
+.erp-btn-primary {
+  background: linear-gradient(135deg, var(--brand-from), var(--brand-to));
+  color: #fff; box-shadow: var(--shadow-brand);
+}
+.erp-btn-primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 12px 30px -5px rgb(99 102 241 / 0.45); }
+.erp-btn-ghost {
+  background: #fff; color: #475569; border: 1px solid rgb(226 232 240);
+}
+.erp-btn-ghost:hover:not(:disabled) { background: #f8fafc; border-color: #cbd5e1; color: #1e293b; }
+
+/* ── 输入框 ── */
+.erp-input {
+  width: 100%; padding: .5625rem .875rem;
+  background: #fff; border: 1px solid #e2e8f0; border-radius: .625rem;
+  font-size: .8125rem; color: #1e293b;
+  transition: all .15s ease;
+}
+.erp-input::placeholder { color: #94a3b8; }
+.erp-input:focus { outline: none; border-color: var(--brand-from); box-shadow: 0 0 0 3px rgb(99 102 241 / 0.12); }
+
+/* ── 表格 ── */
+.erp-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .8125rem; }
+.erp-table thead th {
+  background: #f8fafc; font-weight: 600; font-size: .6875rem; color: #64748b;
+  text-transform: uppercase; letter-spacing: .03em;
+  padding: .75rem 1rem; border-bottom: 1px solid #e2e8f0;
+  position: sticky; top: 0; z-index: 5;
+}
+.erp-table tbody td { padding: .625rem 1rem; border-bottom: 1px solid #f1f5f9; color: #334155; }
+.erp-table tbody tr { transition: background .12s ease; }
+.erp-table tbody tr:hover { background: #f8fafc; }
+.erp-table tbody tr:last-child td { border-bottom: none; }
+
+/* ── 标签 / 状态徽章 ── */
+.erp-badge {
+  display: inline-flex; align-items: center; gap: .25rem;
+  padding: .1875rem .5625rem; border-radius: 9999px;
+  font-size: .6875rem; font-weight: 600; line-height: 1.25;
+}
+
+/* ── Toast ── */
+.erp-toast {
+  position: fixed; top: 1.25rem; right: 1.25rem; z-index: 100;
+  background: #1e293b; color: #fff; padding: .75rem 1.25rem;
+  border-radius: .75rem; box-shadow: var(--shadow-xl);
+  font-size: .8125rem; font-weight: 500;
+  animation: toast-in .25s cubic-bezier(.4,0,.2,1);
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-12px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+
+/* ── 加载骨架 ── */
+.erp-spinner {
+  width: 2rem; height: 2rem; border: 3px solid rgb(99 102 241 / 0.2);
+  border-top-color: #6366f1; border-radius: 50%;
+  animation: spin .7s linear infinite; margin: 0 auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 页面淡入 ── */
+@keyframes fade-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.erp-fade-in { animation: fade-in .3s ease; }
+
+/* ── 弹窗背景 ── */
+.erp-modal-bg { animation: fade-in .2s ease; }
+.erp-modal-panel { animation: modal-in .25s cubic-bezier(.4,0,.2,1); }
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(.95) translateY(10px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}

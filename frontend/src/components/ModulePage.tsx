@@ -1,0 +1,196 @@
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { erpTables } from '../data/mockData';
+import { useAuth } from '../context/AuthContext';
+import { dataApi } from '../api';
+import { bizApi } from '../api';
+
+function getModuleName(tk: string) { const t = erpTables.find(x => x.key === tk); return t?.sub || t?.module || tk; }
+
+export default function ModulePage({ tableKey }: { tableKey: string }) {
+  const { currentUser } = useAuth();
+  const [search, setSearch] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [data, setData] = useState<Record<string, unknown>[]>([]);
+  const [totalRows, setTotalRows] = useState(0);
+  const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState<'view' | 'add' | 'edit' | 'delete'>('view');
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [activeRow, setActiveRow] = useState<Record<string, unknown> | null>(null);
+  const [toast, setToast] = useState('');
+  const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const pageSize = 15;
+
+  const table = useMemo(() => erpTables.find(t => t.key === tableKey), [tableKey]);
+  const isAdmin = currentUser?.role === 'admin';
+  const moduleName = getModuleName(tableKey);
+  const perms = (currentUser?.permissions || []) as any[];
+  const canAdd = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canAdd === true);
+  const canEdit = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canEdit === true);
+  const canDelete = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canDelete === true);
+
+  // 🔧 把 search 参数传给后端，触发后端 LIKE 搜索
+  const fetchData = useCallback(async (pg: number, kw: string) => {
+    if (!table) return;
+    setLoading(true); setError('');
+    try {
+      const r = await dataApi.list(tableKey, pg, pageSize, kw);
+      if (r.data && Array.isArray(r.data.rows)) {
+        setData(r.data.rows);
+        setTotalRows(r.data.total || 0);
+      } else { setData([]); setTotalRows(0); }
+    } catch (err: any) {
+      setError(err.message || '加载失败，请检查后端是否启动');
+      setData([]); setTotalRows(0);
+    }
+    setLoaded(true); setLoading(false);
+  }, [table, tableKey, pageSize]);
+
+  // 首次加载 + tableKey 变化
+  useEffect(() => { setLoaded(false); setSearch(''); setCurrentPage(1); fetchData(1, ''); }, [tableKey]);
+
+  // 翻页触发
+  useEffect(() => { if (loaded) fetchData(currentPage, search); }, [currentPage]);
+
+  // 🔧 搜索触发（去抖）
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const doSearch = (val: string) => {
+    setSearch(val);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => { setCurrentPage(1); fetchData(1, val); }, 400);
+  };
+
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+  const toastFn = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500); }, []);
+
+  const openModal = useCallback((mode: 'view' | 'add' | 'edit' | 'delete', row?: Record<string, unknown>) => {
+    setModalMode(mode); setActiveRow(row || null);
+    if (mode === 'add') { const init: Record<string, unknown> = {}; table?.cols.forEach(c => { init[c[0]] = c[2] === 'number' ? 0 : c[2] === 'date' ? new Date().toISOString().split('T')[0] : ''; }); setFormData(init); }
+    else if (row) setFormData({ ...row });
+    setShowModal(true);
+  }, [table]);
+  const closeModal = useCallback(() => { setShowModal(false); setFormData({}); setActiveRow(null); }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!table) return; setLoading(true);
+    const clean: Record<string, unknown> = {}; for (const k of Object.keys(formData)) { if (k !== '_rowId') clean[k] = formData[k]; }
+    try {
+      if (modalMode === 'edit' && activeRow) {
+        const ri = (activeRow as any).id; await dataApi.update(tableKey, Number(ri), clean);
+        setData(p => p.map(r => String((r as any).id) === String(ri) ? { ...clean, id: ri } : r)); toastFn('修改成功');
+      } else if (modalMode === 'add') {
+        await dataApi.create(tableKey, clean);
+        fetchData(currentPage, search); toastFn('新增成功');
+      }
+    } catch (e: any) { toastFn('操作失败：' + e.message); }
+    setLoading(false); closeModal();
+  }, [table, modalMode, activeRow, formData, tableKey, currentPage, search, fetchData, toastFn, closeModal]);
+
+  const handleDelete = useCallback(async () => {
+    if (!activeRow) return; setLoading(true);
+    try { const ri = (activeRow as any).id; await dataApi.delete(tableKey, Number(ri)); fetchData(currentPage, search); toastFn('删除成功'); }
+    catch (e: any) { toastFn('删除失败：' + e.message); }
+    setLoading(false); closeModal();
+  }, [activeRow, tableKey, currentPage, search, fetchData, toastFn, closeModal]);
+
+  if (!isAdmin && !perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canView === true))
+    return <div className="p-16 text-center erp-fade-in"><div className="text-6xl mb-4">🔒</div><h2 className="text-xl font-bold text-slate-700">权限不足</h2></div>;
+  if (!table) return <div className="p-6 text-slate-500">未找到</div>;
+  if (!loaded && !error) return <div className="p-16 text-center"><div className="erp-spinner mb-3"></div><p className="text-sm text-slate-400">加载中...</p></div>;
+  if (error) return <div className="p-16 text-center erp-fade-in"><div className="text-5xl mb-4">⚠️</div><p className="text-red-500 font-medium">{error}</p></div>;
+
+  return (<div className="p-6 space-y-5 erp-fade-in">
+    {toast && <div className="erp-toast">{toast}</div>}
+
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div>
+        <div className="flex items-center gap-2 text-xs text-slate-400 mb-1.5">
+          <span>{table.module}</span><span className="text-slate-300">/</span><span>{table.sub}</span><span className="text-slate-300">/</span><span className="text-slate-700 font-medium">{table.name}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <h3 className="text-xl font-bold text-slate-800 tracking-tight">{table.name}</h3>
+          <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md font-mono">{tableKey}</span>
+          <span className="text-[11px] text-slate-400">{totalRows} 条 · {table.cols.length} 列</span>
+          {isAdmin && <span className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded-md font-medium">管理员</span>}
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <div className="relative">
+          <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input type="text" value={search} onChange={e => doSearch(e.target.value)} placeholder="搜索..." className="erp-input pl-9 w-56"/>
+        </div>
+        <button onClick={() => bizApi.exportTableCsv(tableKey).catch(e => toastFn('导出失败: ' + e.message))} className="erp-btn erp-btn-ghost" title="导出 CSV">⬇ CSV</button>
+        {canAdd && <button onClick={() => openModal('add')} disabled={loading} className="erp-btn erp-btn-primary">+ 新增</button>}
+      </div>
+    </div>
+
+    {!canAdd && !canEdit && !canDelete && <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-700 flex items-center gap-2">⚠️ 当前为仅查看模式</div>}
+
+    <div className="erp-card overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="erp-table">
+          <thead><tr>
+            <th className="w-12">#</th>
+            {table.cols.map(col => <th key={col[0]} className="whitespace-nowrap">{col[1]}</th>)}
+            <th className="text-center w-40 sticky right-0 bg-slate-50">操作</th>
+          </tr></thead>
+          <tbody>
+            {data.map((row, idx) => <tr key={(row as any).id || idx}>
+              <td className="text-[11px] text-slate-400 font-mono">{(currentPage - 1) * pageSize + idx + 1}</td>
+              {table.cols.map(col => { const v = row[col[0]]; const t = col[2]; return <td key={col[0]} className="whitespace-nowrap" >
+                {t === 'number' ? <span className="font-mono tabular-nums text-slate-700">{typeof v === 'number' ? (v as number).toLocaleString() : String(v ?? '')}</span>
+                : (col[0].includes('status') || col[0].includes('_status')) ? <span className={`erp-badge ${String(v).match(/正常|完成|合格|启用|通过|在线/) ? 'bg-emerald-100 text-emerald-700' : String(v).match(/待|草稿/) ? 'bg-amber-100 text-amber-700' : String(v).match(/取消|停用|报废/) ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'}`}>{String(v ?? '')}</span>
+                : <span className="text-slate-600">{String(v ?? '')}</span>}
+              </td>; })}
+              <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
+                <div className="flex items-center justify-center gap-1.5">
+                  <button onClick={() => openModal('view', row)} className="px-2.5 py-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors font-medium">查看</button>
+                  {canEdit && <button onClick={() => openModal('edit', row)} className="px-2.5 py-1 text-[11px] text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors font-medium">编辑</button>}
+                  {canDelete && <button onClick={() => openModal('delete', row)} className="px-2.5 py-1 text-[11px] text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors font-medium">删除</button>}
+                </div>
+              </td>
+            </tr>)}
+            {data.length === 0 && <tr><td colSpan={table.cols.length + 2} className="px-4 py-16 text-center">
+              <div className="text-slate-300 text-4xl mb-3">📭</div>
+              <p className="text-slate-400 text-sm">{search ? `未找到匹配 "${search}" 的记录` : '暂无数据'}</p>
+            </td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center justify-between px-5 py-3 border-t border-slate-100 bg-slate-50/50">
+        <div className="text-[11px] text-slate-500">共 {totalRows} 条 · 第 {currentPage}/{totalPages} 页</div>
+        <div className="flex gap-1">
+          <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1} className="px-2.5 py-1.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-white transition-colors">«</button>
+          <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-white transition-colors">‹</button>
+          {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => { const p = Math.max(1, Math.min(currentPage - 2, totalPages - 4)) + i; if (p > totalPages) return null; return <button key={p} onClick={() => setCurrentPage(p)} className={`px-3 py-1.5 text-[11px] rounded-lg font-medium transition-all ${currentPage === p ? 'bg-indigo-500 text-white' : 'border border-slate-200 hover:bg-white'}`}>{p}</button>; })}
+          <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage >= totalPages} className="px-3 py-1.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-white transition-colors">›</button>
+          <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage >= totalPages} className="px-2.5 py-1.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-40 hover:bg-white transition-colors">»</button>
+        </div>
+      </div>
+    </div>
+
+    {showModal && (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 erp-modal-bg" onClick={closeModal}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col erp-modal-panel" onClick={e => e.stopPropagation()}>
+          <div className={`px-6 py-4 border-b flex items-center justify-between shrink-0 ${modalMode === 'delete' ? 'bg-red-50' : modalMode === 'view' ? 'bg-slate-50' : 'bg-indigo-50'}`}>
+            <h3 className="font-bold text-slate-800 text-base">{modalMode === 'view' ? '📋 查看详情' : modalMode === 'add' ? '➕ 新增记录' : modalMode === 'edit' ? '✏️ 编辑记录' : '⚠️ 确认删除'}</h3>
+            <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg transition-colors"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <div className="p-6 overflow-y-auto flex-1">
+            {modalMode === 'delete' ? <div className="text-center py-4"><div className="text-4xl mb-3">⚠️</div><p className="text-slate-600 text-sm mb-4">确定要删除这条记录吗？此操作不可撤销。</p><div className="bg-slate-50 rounded-xl p-4 text-left max-w-md mx-auto border border-slate-100">{table.cols.slice(0, 4).map(c => <div key={c[0]} className="flex justify-between py-1.5 text-xs"><span className="text-slate-500">{c[1]}</span><span className="text-slate-800 font-medium">{String(formData[c[0]] ?? '-')}</span></div>)}</div></div>
+            : <div className="space-y-3">{table.cols.map(c => { const k = c[0], l = c[1], t = c[2]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{(formData[k] as number).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
+          </div>
+          <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/50">
+            <button onClick={closeModal} className="erp-btn erp-btn-ghost">取消</button>
+            {modalMode === 'delete' && <button onClick={handleDelete} disabled={loading} className="erp-btn bg-red-500 text-white hover:bg-red-600">{loading?'删除中...':'确认删除'}</button>}
+            {modalMode === 'edit' && <button onClick={handleSave} disabled={loading} className="erp-btn erp-btn-primary">{loading?'保存中...':'保存修改'}</button>}
+            {modalMode === 'add' && <button onClick={handleSave} disabled={loading} className="erp-btn erp-btn-primary">{loading?'保存中...':'确认新增'}</button>}
+          </div>
+        </div>
+      </div>
+    )}
+</div>);
+}
+
+

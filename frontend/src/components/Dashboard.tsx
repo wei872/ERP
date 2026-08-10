@@ -1,0 +1,210 @@
+import { useEffect, useState } from 'react';
+import { BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { useAuth } from '../context/AuthContext';
+import { bizApi } from '../api';
+import { erpTables } from '../data/mockData';
+
+const COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
+const EMPTY: { name: string; value: number }[] = [];
+
+function StatCard({ icon, label, value, gradient }: { icon: string; label: string; value: string; gradient: string }) {
+  return (
+    <div className="erp-card erp-card-hover p-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs text-slate-400 font-medium mb-1.5">{label}</p>
+          <p className="text-2xl font-bold text-slate-800 tracking-tight tabular-nums">{value}</p>
+        </div>
+        <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl bg-gradient-to-br ${gradient}`} style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>{icon}</div>
+      </div>
+    </div>
+  );
+}
+
+function ChartCard({ title, children, empty }: { title: string; children: React.ReactNode; empty?: boolean }) {
+  return (
+    <div className="erp-card p-6">
+      <h3 className="font-semibold text-slate-800 text-sm mb-4 flex items-center gap-2">{title}</h3>
+      {children}
+      {empty && <p className="text-center text-xs text-slate-400 mt-3">暂无数据</p>}
+    </div>
+  );
+}
+
+function n2v(n: any): number { const v = Number(n); return Number.isFinite(v) ? v : 0; }
+function fmt(v: number): string { return v >= 10000 ? `${(v/10000).toFixed(1)}万` : v.toLocaleString(); }
+
+export default function Dashboard() {
+  const { currentUser, users } = useAuth();
+  const [data, setData] = useState<any>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    setLoadFailed(false);
+    bizApi.dashboard().then(r => { if (!cancelled) setData(r.data); })
+      .catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const stats = data?.stats || {};
+  const salesMonthly = data?.salesMonthly || EMPTY;
+  const salesWeekly = data?.salesWeekly || EMPTY;
+  const purchaseMonthly = data?.purchaseMonthly || EMPTY;
+  const productCategory = (data?.productCategory || []).map((d: any) => ({ name: d.name || '未知', value: n2v(d.value) }));
+  const qualityMonthly = data?.qualityMonthly || EMPTY;
+
+  const onlineUsers = users.filter(u => u.status === 'active').length;
+  const pendingUsers = users.filter(u => u.status === 'pending').length;
+  const roleDistribution = (() => {
+    const c: Record<string, number> = {};
+    const l: Record<string, string> = { sales:'销售', aftersale:'售后', warehouse:'仓管', accounting:'会计', production:'生产', hr:'人事', procurement:'采购' };
+    users.filter(u => u.role !== 'admin' && u.status === 'active').forEach(u => {
+      const lb = l[u.role] || u.role; c[lb] = (c[lb] || 0) + 1;
+    });
+    return Object.entries(c).map(([name, value]) => ({ name, value }));
+  })();
+
+  if (data === null && !loadFailed) return <div className="p-16 text-center"><div className="erp-spinner mb-3"></div><p className="text-sm text-slate-400">仪表盘加载中...</p></div>;
+  if (data === null && loadFailed) return (
+    <div className="p-16 text-center erp-fade-in">
+      <div className="text-5xl mb-4">⚠️</div>
+      <p className="text-red-500 font-medium mb-2">仪表盘数据加载失败</p>
+      <p className="text-xs text-slate-400">请确认后端服务已启动且数据库已加载 init.sql / upgrade.sql</p>
+    </div>
+  );
+
+  return (
+    <div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
+      {/* Hero Banner */}
+      <div className="rounded-2xl p-8 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed, #6366f1)' }}>
+        <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '30px 30px' }}></div>
+        <div className="absolute -top-24 -right-24 w-64 h-64 rounded-full" style={{ background: 'rgba(255,255,255,0.06)' }}></div>
+        <div className="absolute -bottom-32 -left-20 w-72 h-72 rounded-full" style={{ background: 'rgba(255,255,255,0.04)' }}></div>
+        <div className="relative">
+          <h2 className="text-2xl font-bold mb-2 tracking-tight">欢迎回来，{currentUser?.realName} 👋</h2>
+          <p className="text-indigo-100 text-sm">{new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'})} · ERP 企业管理系统 · {erpTables?.length || 0} 张数据表</p>
+          <div className="flex gap-4 mt-5">
+            <div className="bg-white/15 backdrop-blur-md rounded-xl px-5 py-3 border border-white/10">
+              <div className="text-xs text-indigo-100 mb-1">在职用户</div>
+              <div className="text-2xl font-bold tabular-nums">{onlineUsers}</div>
+            </div>
+            {currentUser?.role==='admin' && pendingUsers>0 && (
+              <div className="bg-red-500/30 backdrop-blur-md rounded-xl px-5 py-3 border border-red-300/20">
+                <div className="text-xs text-red-100 mb-1">待审核</div>
+                <div className="text-2xl font-bold tabular-nums">{pendingUsers}</div>
+              </div>
+            )}
+            <div className="bg-white/15 backdrop-blur-md rounded-xl px-5 py-3 border border-white/10">
+              <div className="text-xs text-indigo-100 mb-1">数据库表数</div>
+              <div className="text-2xl font-bold tabular-nums">{n2v(stats.totalTables?.value)}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Stat Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600"/>
+        <StatCard icon="📦" label="累计销售单数" value={n2v(stats.totalOrders?.value).toLocaleString()} gradient="from-indigo-400 to-indigo-600"/>
+        <StatCard icon="👥" label="客户总数" value={n2v(stats.totalCustomers?.value).toLocaleString()} gradient="from-emerald-400 to-emerald-600"/>
+        <StatCard icon="🏗️" label="累计生产产量" value={`${fmt(n2v(stats.productionOutput?.value))}件`} gradient="from-orange-400 to-orange-600"/>
+        <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600"/>
+      </div>
+
+      {/* Charts Row 1 */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ChartCard title="📈 销售趋势（按月）">
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={salesMonthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <defs><linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/><stop offset="95%" stopColor="#6366f1" stopOpacity={0}/></linearGradient></defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}/>
+              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v:any) => fmt(Number(v))}/>
+              <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.08)' }}/>
+              <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2.5} fill="url(#salesGrad)"/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <ChartCard title="🛒 采购趋势（按月）">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={purchaseMonthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}/>
+              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v:any) => fmt(Number(v))}/>
+              <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0', boxShadow: '0 10px 25px rgba(0,0,0,0.08)' }} cursor={{ fill: 'rgba(6,182,212,0.05)' }}/>
+              <Bar dataKey="value" fill="#06b6d4" radius={[6, 6, 0, 0]} maxBarSize={48}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      </div>
+
+      {/* Charts Row 2 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <ChartCard title="📦 库存金额分布 TOP10" empty={productCategory.length === 0}>
+          <ResponsiveContainer width="100%" height={240}>
+            <PieChart>
+              <Pie data={productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false}>
+                {(productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]).map((_: any, i: any) => <Cell key={i} fill={COLORS[i % COLORS.length]}/>)}
+              </Pie>
+              <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0' }}/>
+            </PieChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <ChartCard title="📊 近 7 天销售趋势" empty={salesWeekly.length === 0}>
+          <ResponsiveContainer width="100%" height={240}>
+            <LineChart data={salesWeekly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}/>
+              <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v:any) => fmt(Number(v))}/>
+              <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0' }}/>
+              <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2.5} dot={{ fill: '#10b981', r: 4 }} activeDot={{ r: 6 }}/>
+            </LineChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        {currentUser?.role === 'admin' ? (
+          <ChartCard title="👥 部门人员分布">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={roleDistribution} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false}/>
+                <XAxis type="number" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}/>
+                <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} width={40}/>
+                <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0' }} cursor={{ fill: 'rgba(139,92,246,0.05)' }}/>
+                <Bar dataKey="value" fill="#8b5cf6" radius={[0, 6, 6, 0]} maxBarSize={28}/>
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        ) : (
+          <ChartCard title="✅ 质量合格率趋势">
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={qualityMonthly.length ? qualityMonthly : [{ name: '暂无', value: 100 }]} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
+                <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}/>
+                <YAxis domain={[60, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false}/>
+                <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0' }}/>
+                <Line type="monotone" dataKey="value" stroke="#f59e0b" strokeWidth={2.5} dot={{ fill: '#f59e0b', r: 4 }}/>
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        )}
+      </div>
+
+      {/* Bottom KPI Gradient Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {[
+          { label: '准时交货率', value: `${n2v(stats.onTimeDelivery?.value)}%`, from: '#3b82f6', to: '#2563eb' },
+          { label: '质量合格率', value: `${n2v(stats.qualityRate?.value)}%`, from: '#10b981', to: '#059669' },
+          { label: '累计采购总额', value: `¥${fmt(n2v(stats.totalPurchase?.value))}`, from: '#8b5cf6', to: '#7c3aed' },
+          { label: '在编员工数', value: n2v(stats.totalEmployees?.value), from: '#f59e0b', to: '#d97706' },
+        ].map((c, i) => (
+          <div key={i} className="rounded-2xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${c.from}, ${c.to})`, boxShadow: '0 8px 20px -6px rgba(0,0,0,0.15)' }}>
+            <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-white/10"></div>
+            <div className="relative">
+              <div className="text-sm opacity-80 mb-1.5 font-medium">{c.label}</div>
+              <div className="text-3xl font-bold tracking-tight tabular-nums">{c.value}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
