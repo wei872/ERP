@@ -158,13 +158,13 @@ public class BizController {
     @PostMapping("/production/scrap") public Result productionScrap(@RequestBody Map<String,Object> body, HttpServletRequest req) {
         if (!"admin".equals(role(req)) && !"production".equals(role(req))) return Result.error("权限不足");
         try {
-            production.recordScrap(
+            Map<String,Object> res = production.recordScrap(
                 String.valueOf(body.get("work_order_no")),
                 new java.math.BigDecimal(body.getOrDefault("scrap_qty","0").toString()),
                 String.valueOf(body.getOrDefault("reason","")),
                 user(req));
             audit.log(user(req), "生产", "报废记录", String.valueOf(body.get("work_order_no")), audit.getIp(req));
-            return Result.ok("ok");
+            return Result.ok(res);
         } catch (Exception e) { return Result.error("报废失败: " + e.getMessage()); }
     }
     @PostMapping("/production/requisition-confirm") public Result confirmRequisition(@RequestBody Map<String,Object> body, HttpServletRequest req) {

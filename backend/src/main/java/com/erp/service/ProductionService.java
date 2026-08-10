@@ -143,13 +143,28 @@ public class ProductionService {
         return ret;
     }
 
-    /** 报废记录 */
+    /** 报废记录：写入 prod_scrap_main 并更新工单累计报废量 */
     @Transactional
-    public void recordScrap(String workOrderNo, BigDecimal scrapQty, String reason, String operator) {
+    public Map<String,Object> recordScrap(String workOrderNo, BigDecimal scrapQty, String reason, String operator) {
+        if (workOrderNo == null || workOrderNo.trim().isEmpty()) throw new RuntimeException("工单号不能为空");
+        Map<String,Object> wo;
+        try {
+            wo = db.queryForMap("SELECT * FROM prod_work_order WHERE work_order_no=?", workOrderNo.trim());
+        } catch (Exception e) {
+            throw new RuntimeException("未能找到单号为 [" + workOrderNo + "] 的生产工单，请检查单号或在列表中选择！");
+        }
         String scrapNo = "SCP-" + System.currentTimeMillis();
-        db.update("INSERT INTO prod_scrap_main(scrap_no,work_order_no,scrap_qty,scrap_reason,handler,scrap_date,status) VALUES(?,?,?,?,?,CURDATE(),'已确认')",
-            scrapNo, workOrderNo, scrapQty, reason == null ? "" : reason, operator == null ? "系统" : operator);
-        db.update("UPDATE prod_work_order SET scrap_qty=scrap_qty+? WHERE work_order_no=?", scrapQty, workOrderNo);
+        db.update("INSERT INTO prod_scrap_main(scrap_no,work_order_no,product_code,product_name,scrap_qty,scrap_reason,handler,scrap_date,status) VALUES(?,?,?,?,?,?,?,CURDATE(),'已确认')",
+            scrapNo, workOrderNo.trim(), wo.get("product_code"), wo.get("product_name"), scrapQty, reason == null ? "" : reason, operator == null ? "系统" : operator);
+        db.update("UPDATE prod_work_order SET scrap_qty=scrap_qty+? WHERE work_order_no=?", scrapQty, workOrderNo.trim());
+
+        Map<String,Object> res = new HashMap<>();
+        res.put("scrap_no", scrapNo);
+        res.put("work_order_no", workOrderNo);
+        res.put("product_code", wo.get("product_code"));
+        res.put("scrap_qty", scrapQty);
+        res.put("reason", reason);
+        return res;
     }
 
     /** 领料确认：从指定领料单扣减库存，并自动联动直接材料成本凭证(5001/1403) */

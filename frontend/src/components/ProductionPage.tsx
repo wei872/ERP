@@ -22,11 +22,12 @@ export default function ProductionPage() {
   // 动态数据列表
   const [workOrders, setWorkOrders] = useState<any[]>([]);
   const [requisitions, setRequisitions] = useState<any[]>([]);
+  const [scraps, setScraps] = useState<any[]>([]);
   const [loadingLists, setLoadingLists] = useState(false);
 
   const toastFn = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(''), 3000); }, []);
 
-  // 加载系统现有工单与领料单列表
+  // 加载系统现有工单、领料单与报废单列表
   const loadLists = useCallback(async () => {
     setLoadingLists(true);
     try {
@@ -35,6 +36,9 @@ export default function ProductionPage() {
 
       const reqRes = await dataApi.list('prod_material_requisition', 1, 100, '');
       if (reqRes.data?.rows) setRequisitions(reqRes.data.rows);
+
+      const scrapRes = await dataApi.list('prod_scrap_main', 1, 100, '');
+      if (scrapRes.data?.rows) setScraps(scrapRes.data.rows);
     } catch (e) {
       // 忽略非阻断性加载异常
     }
@@ -82,6 +86,14 @@ export default function ProductionPage() {
     toastFn(`已加载工单 [${wo.work_order_no}]，可确认生产入库数量！`);
   };
 
+  const triggerScrap = (wo: any) => {
+    setAction('scrap');
+    setScrapNo(wo.work_order_no || '');
+    setScrapQty(1);
+    setResult(null);
+    toastFn(`已加载工单 [${wo.work_order_no}]，可填写报废数量与原因！`);
+  };
+
   const triggerSettle = async (woNo: string) => {
     if (!woNo) return;
     setSaving(true); setResult(null);
@@ -118,16 +130,15 @@ export default function ProductionPage() {
       if (action === 'workorder') {
         if (!woProduct) { toastFn('产品编码必填'); setSaving(false); return; }
         r = await bizApi.createWorkOrder({ plan_no: woPlanNo, product_code: woProduct, spec_model: woSpec, plan_qty: woQty, workshop: woWorkshop });
-        toastFn(`✅ 工单创建成功！号：${r?.data?.work_order_no || ''}`);
+        toastFn(`✅ 工单创建成功！单号：${r?.data?.work_order_no || ''}`);
       } else if (action === 'warehousing') {
         if (!whNo) { toastFn('请选择或填写有效工单号'); setSaving(false); return; }
         r = await bizApi.productionWarehousing({ work_order_no: whNo, actual_qty: whQty, warehouse: whWarehouse });
         toastFn(`✅ 生产入库成功！入库单号：${r?.data?.warehousing_no || ''}`);
       } else if (action === 'scrap') {
         if (!scrapNo) { toastFn('请选择或填写有效工单号'); setSaving(false); return; }
-        await bizApi.productionScrap({ work_order_no: scrapNo, scrap_qty: scrapQty, reason: scrapReason });
-        r = { ok: true, message: '报废登记成功' };
-        toastFn('✅ 报废登记成功');
+        r = await bizApi.productionScrap({ work_order_no: scrapNo, scrap_qty: scrapQty, reason: scrapReason });
+        toastFn(`✅ 报废登记成功！报废单号：${r?.data?.scrap_no || ''}`);
       } else if (action === 'requisition') {
         if (!reqNo) { toastFn('请选择或填写有效领料单号'); setSaving(false); return; }
         await bizApi.confirmRequisition({ req_no: reqNo, actual_qty: reqQty, warehouse: reqWh });
@@ -147,15 +158,50 @@ export default function ProductionPage() {
   if (!canAccess) return <div className="p-12 text-center"><div className="text-5xl mb-3">🔒</div><p className="text-gray-500">仅 admin / production / warehouse 可访问</p></div>;
 
   return (
-    <div className="erp-fade-in p-6 space-y-6 max-w-[1300px] mx-auto">
+    <div className="erp-fade-in p-6 space-y-6 max-w-[1350px] mx-auto">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> 生产管理使用指南与后台数据联动说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">工单全生命周期</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>【创建工单】：录入产品编码与数量，系统自动展开 BOM 生成待扣库领料单。</li>
+              <li>【领料确认】：在下表直接点击 **`📋 一键扣库确认`** 扣减原材料。</li>
+              <li>【生产入库】：在工单列表直接点击 **`📦 生产入库`**，确认成品入库；在【报废登记】中处理残次品。</li>
+              <li>【成本结算】：点击 **`💰 成本结算`**，核算产品最终成本并建立完工凭证。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>领料确认 ➔ 自动扣减原材料库存，并**生成领料成本凭证（借:5001生产成本 贷:1403原材料）**。</li>
+              <li>生产入库 ➔ 自动增加产成品实际库存余额，更新工单已完成数量。</li>
+              <li>报废登记 ➔ 实时记录报废单 `prod_scrap_main` 并累加工单 `scrap_qty` 报废量。</li>
+              <li>成本结算 ➔ 汇总材料与工序成本更新商品单位成本，**生成完工凭证（借:1405库存商品 贷:5001生产成本）**。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-800">🏗️ 生产管理 - 工单全生命周期</h2>
-          <p className="text-sm text-gray-500 mt-1">工单创建 ➔ 智能 BOM 展算 ➔ 领料确认 ➔ 生产入库 ➔ 成本结算全联动</p>
+          <p className="text-sm text-gray-500 mt-1">工单创建 ➔ 智能 BOM 展算 ➔ 领料确认 ➔ 生产入库 ➔ 报废登记 ➔ 成本结算全联动</p>
         </div>
-        <button onClick={loadLists} disabled={loadingLists} className="px-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm">
-          {loadingLists ? '刷新中...' : '↻ 刷新数据看板'}
+        <button onClick={loadLists} disabled={loadingLists} className="px-3.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors shadow-sm font-medium">
+          {loadingLists ? '刷新中...' : '↻ 刷新看板数据'}
         </button>
       </div>
 
@@ -282,7 +328,7 @@ export default function ProductionPage() {
           )}
         </div>
 
-        {/* 动态工单与领料单实时看板 */}
+        {/* 动态工单、领料单与报废记录实时看板 */}
         <div className="lg:col-span-2 space-y-5">
           {/* 工单看板 */}
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 space-y-3">
@@ -300,28 +346,31 @@ export default function ProductionPage() {
                     <th>商品</th>
                     <th>计划量</th>
                     <th>实际入库</th>
+                    <th>报废数</th>
                     <th>状态</th>
                     <th className="text-center">快捷一键联动</th>
                   </tr>
                 </thead>
                 <tbody>
                   {workOrders.length === 0 ? (
-                    <tr><td colSpan={6} className="text-center py-6 text-slate-400">暂无生产工单，点击左侧【创建工单】即可生成</td></tr>
+                    <tr><td colSpan={7} className="text-center py-6 text-slate-400">暂无生产工单，点击左侧【创建工单】即可生成</td></tr>
                   ) : (
-                    workOrders.slice(0, 8).map(wo => (
+                    workOrders.slice(0, 6).map(wo => (
                       <tr key={wo.id || wo.work_order_no}>
                         <td className="font-mono text-indigo-600 font-medium">{wo.work_order_no}</td>
                         <td className="font-medium text-slate-800">{wo.product_name || wo.product_code}</td>
                         <td className="tabular-nums">{wo.plan_qty}</td>
                         <td className="tabular-nums font-semibold text-emerald-600">{wo.actual_qty || 0}</td>
+                        <td className="tabular-nums text-red-600 font-medium">{wo.scrap_qty || 0}</td>
                         <td>
                           <span className={`erp-badge ${wo.order_status === '已完成' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                             {wo.order_status || '生产中'}
                           </span>
                         </td>
                         <td className="text-center space-x-1 whitespace-nowrap">
-                          <button onClick={() => triggerWarehousing(wo)} className="px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded text-[11px] font-medium transition-colors">📦 生产入库</button>
-                          <button onClick={() => triggerSettle(wo.work_order_no)} className="px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[11px] font-medium transition-colors">💰 成本结算</button>
+                          <button onClick={() => triggerWarehousing(wo)} className="px-2 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded text-[11px] font-medium transition-colors">📦 入库</button>
+                          <button onClick={() => triggerScrap(wo)} className="px-2 py-1 bg-red-50 text-red-700 hover:bg-red-100 rounded text-[11px] font-medium transition-colors">⚠️ 报废</button>
+                          <button onClick={() => triggerSettle(wo.work_order_no)} className="px-2 py-1 bg-purple-50 text-purple-700 hover:bg-purple-100 rounded text-[11px] font-medium transition-colors">💰 结算</button>
                         </td>
                       </tr>
                     ))
@@ -355,7 +404,7 @@ export default function ProductionPage() {
                   {requisitions.length === 0 ? (
                     <tr><td colSpan={6} className="text-center py-6 text-slate-400">暂无领料单，创建工单时若物料有 BOM 会自动展算生成</td></tr>
                   ) : (
-                    requisitions.slice(0, 6).map(req => (
+                    requisitions.slice(0, 4).map(req => (
                       <tr key={req.id || req.req_no}>
                         <td className="font-mono text-amber-700 font-medium">{req.req_no}</td>
                         <td className="font-mono text-slate-500">{req.ref_work_order}</td>
@@ -363,7 +412,7 @@ export default function ProductionPage() {
                         <td className="tabular-nums">{req.plan_req_qty}</td>
                         <td className="tabular-nums text-emerald-600 font-semibold">{req.actual_req_qty || 0}</td>
                         <td className="text-center">
-                          <button onClick={() => triggerConfirmReq(req)} className="px-2.5 py-1 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded text-[11px] font-medium transition-colors">📋 一键扣库确认</button>
+                          <button onClick={() => triggerConfirmReq(req)} className="px-2.5 py-1 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded text-[11px] font-medium transition-colors">📋 扣库确认</button>
                         </td>
                       </tr>
                     ))
@@ -372,6 +421,44 @@ export default function ProductionPage() {
               </table>
             </div>
           </div>
+
+          {/* 报废登记记录列表看板 */}
+          {scraps.length > 0 && (
+            <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <span>⚠️ 已登记报废记录表 (`prod_scrap_main`)</span>
+                  <span className="text-xs text-slate-400 font-normal">({scraps.length} 个)</span>
+                </h4>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="erp-table text-xs">
+                  <thead>
+                    <tr>
+                      <th>报废单号</th>
+                      <th>关联工单</th>
+                      <th>商品</th>
+                      <th>报废数量</th>
+                      <th>报废原因</th>
+                      <th>登记时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scraps.slice(0, 5).map(sc => (
+                      <tr key={sc.id || sc.scrap_no}>
+                        <td className="font-mono text-red-600 font-medium">{sc.scrap_no}</td>
+                        <td className="font-mono text-slate-600">{sc.work_order_no}</td>
+                        <td className="font-medium text-slate-800">{sc.product_name || sc.product_code}</td>
+                        <td className="tabular-nums font-bold text-red-600">{sc.scrap_qty}</td>
+                        <td className="text-slate-600 max-w-[150px] truncate">{sc.scrap_reason || '-'}</td>
+                        <td className="text-slate-400 font-mono text-[11px]">{String(sc.scrap_date || sc.created_at || '-').slice(0, 10)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
