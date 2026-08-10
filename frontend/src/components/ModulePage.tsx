@@ -20,6 +20,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [previewImg, setPreviewImg] = useState<string | null>(null);
   const pageSize = 15;
 
   const table = useMemo(() => erpTables.find(t => t.key === tableKey), [tableKey]);
@@ -63,6 +64,21 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const toastFn = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500); }, []);
+
+  const handleFileUpload = useCallback((k: string, file: File | null) => {
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      toastFn('❌ 图片文件不能超过 10MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target?.result as string;
+      setFormData(prev => ({ ...prev, [k]: result }));
+      toastFn('✅ 图片已选定并转 Base64，可直接保存落库！');
+    };
+    reader.readAsDataURL(file);
+  }, [toastFn]);
 
   const openModal = useCallback((mode: 'view' | 'add' | 'edit' | 'delete', row?: Record<string, unknown>) => {
     setModalMode(mode); setActiveRow(row || null);
@@ -187,8 +203,10 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
           <tbody>
             {data.map((row, idx) => <tr key={(row as any).id || idx}>
               <td className="text-[11px] text-slate-400 font-mono">{(currentPage - 1) * pageSize + idx + 1}</td>
-              {table.cols.map(col => { const v = row[col[0]]; const t = col[2]; return <td key={col[0]} className="whitespace-nowrap" >
-                {t === 'number' ? <span className="font-mono tabular-nums text-slate-700">{typeof v === 'number' ? (v as number).toLocaleString() : String(v ?? '')}</span>
+              {table.cols.map(col => { const v = row[col[0]]; const t = col[2]; const k = col[0]; return <td key={col[0]} className="whitespace-nowrap" >
+                {t === 'image' || k.includes('image') || String(v ?? '').startsWith('data:image/') ? (
+                  v ? <img src={String(v)} alt="发票图片" onClick={() => setPreviewImg(String(v))} className="h-9 w-14 object-cover rounded border border-slate-200 cursor-pointer shadow-sm hover:scale-105 transition-transform" title="点击放大查看图片" /> : <span className="text-slate-300 text-xs italic">无图片</span>
+                ) : t === 'number' ? <span className="font-mono tabular-nums text-slate-700">{typeof v === 'number' ? (v as number).toLocaleString() : String(v ?? '')}</span>
                 : (col[0].includes('status') || col[0].includes('_status')) ? <span className={`erp-badge ${String(v).match(/正常|完成|合格|启用|通过|在线/) ? 'bg-emerald-100 text-emerald-700' : String(v).match(/待|草稿/) ? 'bg-amber-100 text-amber-700' : String(v).match(/取消|停用|报废/) ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'}`}>{String(v ?? '')}</span>
                 : <span className="text-slate-600">{String(v ?? '')}</span>}
               </td>; })}
@@ -231,7 +249,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
           </div>
           <div className="p-6 overflow-y-auto flex-1">
             {modalMode === 'delete' ? <div className="text-center py-4"><div className="text-4xl mb-3">⚠️</div><p className="text-slate-600 text-sm mb-4">确定要删除这条记录吗？此操作不可撤销。</p><div className="bg-slate-50 rounded-xl p-4 text-left max-w-md mx-auto border border-slate-100">{table.cols.slice(0, 4).map(c => <div key={c[0]} className="flex justify-between py-1.5 text-xs"><span className="text-slate-500">{c[1]}</span><span className="text-slate-800 font-medium">{String(formData[c[0]] ?? '-')}</span></div>)}</div></div>
-            : <div className="space-y-3">{table.cols.map(c => { const k = c[0], l = c[1], t = c[2]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{(formData[k] as number).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
+            : <div className="space-y-3">{table.cols.map(c => { const k = c[0], l = c[1], t = c[2]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{t === 'image' || k.includes('image') || String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : t === 'image' || k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预监" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
           </div>
           <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/50">
             <button onClick={closeModal} className="erp-btn erp-btn-ghost">取消</button>
@@ -239,6 +257,17 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
             {modalMode === 'edit' && <button onClick={handleSave} disabled={loading} className="erp-btn erp-btn-primary">{loading?'保存中...':'保存修改'}</button>}
             {modalMode === 'add' && <button onClick={handleSave} disabled={loading} className="erp-btn erp-btn-primary">{loading?'保存中...':'确认新增'}</button>}
           </div>
+        </div>
+      </div>
+    )}
+    {previewImg && (
+      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-[100] p-4 erp-fade-in" onClick={() => setPreviewImg(null)}>
+        <div className="relative max-w-4xl max-h-[92vh] flex flex-col items-center" onClick={e => e.stopPropagation()}>
+          <div className="flex justify-between items-center w-full mb-3 text-white">
+            <span className="text-sm font-semibold flex items-center gap-2">🖼️ 高清发票/图片全屏预览</span>
+            <button onClick={() => setPreviewImg(null)} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold text-white transition-colors">关闭 ✕</button>
+          </div>
+          <img src={previewImg} alt="全屏预览" className="max-w-full max-h-[82vh] rounded-2xl shadow-2xl object-contain border border-white/20 bg-white" />
         </div>
       </div>
     )}

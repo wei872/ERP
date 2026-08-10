@@ -44,11 +44,13 @@ CREATE TABLE IF NOT EXISTS finance_tax_main (id BIGINT AUTO_INCREMENT PRIMARY KE
 -- ===== 补充 OA-审批 =====
 CREATE TABLE IF NOT EXISTS oa_expense_approval (id BIGINT AUTO_INCREMENT PRIMARY KEY, approval_no VARCHAR(50), expense_type VARCHAR(30), amount DECIMAL(18,2), applicant VARCHAR(50), approver VARCHAR(50), approval_status VARCHAR(20), remark TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB;
 
--- 兼容已部署环境：给 oa_approval_main 补 ref_no / amount 两列（init.sql 新建库已含）
+-- 兼容已部署环境：给 oa_approval_main 补 ref_no / amount 两列，给 finance_invoice_main 补 invoice_image 发票图片列（init.sql 新建库已含）
 SET @c1 = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='oa_approval_main' AND COLUMN_NAME='ref_no');
 SET @s1 = IF(@c1=0, 'ALTER TABLE oa_approval_main ADD COLUMN ref_no VARCHAR(50)', 'SELECT 1'); PREPARE st1 FROM @s1; EXECUTE st1; DEALLOCATE PREPARE st1;
 SET @c2 = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='oa_approval_main' AND COLUMN_NAME='amount');
 SET @s2 = IF(@c2=0, 'ALTER TABLE oa_approval_main ADD COLUMN amount DECIMAL(18,2)', 'SELECT 1'); PREPARE st2 FROM @s2; EXECUTE st2; DEALLOCATE PREPARE st2;
+SET @c_inv = (SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='finance_invoice_main' AND COLUMN_NAME='invoice_image');
+SET @s_inv = IF(@c_inv=0, 'ALTER TABLE finance_invoice_main ADD COLUMN invoice_image LONGTEXT', 'SELECT 1'); PREPARE st_inv FROM @s_inv; EXECUTE st_inv; DEALLOCATE PREPARE st_inv;
 CREATE TABLE IF NOT EXISTS oa_leave_approval (id BIGINT AUTO_INCREMENT PRIMARY KEY, approval_no VARCHAR(50), emp_name VARCHAR(50), leave_type VARCHAR(30), start_date DATE, end_date DATE, leave_days DECIMAL(5,1), approver VARCHAR(50), approval_status VARCHAR(20), remark TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB;
 
 -- ===== 数据库性能索引 =====
