@@ -155,21 +155,27 @@ public class DataController {
                 if(!first){sb.append(",");vb.append(",");}
                 sb.append("`").append(k).append("`");
                 vb.append("?");
-                params.add(e.getValue());
+                Object val = e.getValue();
+                if ("".equals(val)) val = null; // 空字符串转 null，防止 MySQL DATE/DECIMAL 类型匹配报错
+                params.add(val);
                 first=false;
             }
             if(params.isEmpty())return Result.error("无可插入字段");
             sb.append(")").append(vb).append(")");db.update(sb.toString(),params.toArray());
             Long newId=db.queryForObject("SELECT LAST_INSERT_ID()",Long.class);
             audit.log(String.valueOf(req.getAttribute("user")),table,"新增","id="+newId,audit.getIp(req));
-            if(t.equals("trade_stock_in_main")) handleStockIn(body);
-            if(t.equals("trade_stock_out_main")) handleStockOut(body);
-            if(t.equals("trade_stock_in_detail")) handleStockInDetail(body);
-            if(t.equals("trade_stock_out_detail")) handleStockOutDetail(body);
-            if(t.equals("trade_sales_main")) finance.generateVoucherFromSale(newId);
-            if(t.equals("trade_purchase_main")) finance.generateVoucherFromPurchase(newId);
+            try {
+                if(t.equals("trade_stock_in_main")) handleStockIn(body);
+                if(t.equals("trade_stock_out_main")) handleStockOut(body);
+                if(t.equals("trade_stock_in_detail")) handleStockInDetail(body);
+                if(t.equals("trade_stock_out_detail")) handleStockOutDetail(body);
+                if(t.equals("trade_sales_main")) finance.generateVoucherFromSale(newId);
+                if(t.equals("trade_purchase_main")) finance.generateVoucherFromPurchase(newId);
+            } catch (Exception e) {
+                System.err.println("Table insert hook warning for " + t + " id=" + newId + ": " + e.getMessage());
+            }
             return Result.ok("新增成功");
-        }catch(Exception e){return Result.error("操作失败: "+e.getMessage());}
+        }catch(Exception e){return Result.error("新增失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
     }
 
     @Transactional
@@ -184,14 +190,16 @@ public class DataController {
                 if(!COL_PATTERN.matcher(k).matches()) continue;
                 if(!f)sb.append(",");
                 sb.append("`").append(k).append("`=?");
-                params.add(e.getValue());
+                Object val = e.getValue();
+                if ("".equals(val)) val = null;
+                params.add(val);
                 f=false;
             }
             if(params.isEmpty())return Result.error("无更新字段");
             sb.append(" WHERE id=?");params.add(id);int n=db.update(sb.toString(),params.toArray());
             audit.log(String.valueOf(req.getAttribute("user")),table,"修改","id="+id,audit.getIp(req));
             return n>0?Result.ok("修改成功"):Result.error("记录不存在");
-        }catch(Exception e){return Result.error("更新失败: "+e.getMessage());}
+        }catch(Exception e){return Result.error("修改失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
     }
 
     @Transactional

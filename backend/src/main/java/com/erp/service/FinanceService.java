@@ -20,7 +20,10 @@ public class FinanceService {
     @Transactional
     public void generateVoucherFromSale(Long saleId) throws Exception {
         Map<String,Object> sale = db.queryForMap("SELECT * FROM trade_sales_main WHERE id=?", saleId);
-        BigDecimal amt = new BigDecimal(sale.get("total_amount").toString());
+        Object amtObj = sale.get("total_amount");
+        if (amtObj == null) return;
+        BigDecimal amt = toBD(amtObj);
+        if (amt.compareTo(BigDecimal.ZERO) <= 0) return;
         String vn = "VZ-" + System.currentTimeMillis();
         String period = new SimpleDateFormat("yyyy-MM").format(new Date());
         db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核')", vn, period, amt, amt);
@@ -40,7 +43,10 @@ public class FinanceService {
     @Transactional
     public void generateVoucherFromPurchase(Long purchaseId) throws Exception {
         Map<String,Object> po = db.queryForMap("SELECT * FROM trade_purchase_main WHERE id=?", purchaseId);
-        BigDecimal amt = new BigDecimal(po.get("total_amount").toString());
+        Object amtObj = po.get("total_amount");
+        if (amtObj == null) return;
+        BigDecimal amt = toBD(amtObj);
+        if (amt.compareTo(BigDecimal.ZERO) <= 0) return;
         String vn = "VZ-" + System.currentTimeMillis();
         String period = new SimpleDateFormat("yyyy-MM").format(new Date());
         db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核')", vn, period, amt, amt);
