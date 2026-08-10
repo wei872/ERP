@@ -198,8 +198,65 @@ public class DataController {
             if(params.isEmpty())return Result.error("无更新字段");
             sb.append(" WHERE id=?");params.add(id);int n=db.update(sb.toString(),params.toArray());
             audit.log(String.valueOf(req.getAttribute("user")),table,"修改","id="+id,audit.getIp(req));
+
+            // 级联更正业务模块关联数据与凭证/应收应付总账
+            if (t.equals("trade_sales_main")) handleUpdateSalesMain(id, body);
+            if (t.equals("trade_purchase_main")) handleUpdatePurchaseMain(id, body);
+            if (t.equals("finance_receivable_main")) handleUpdateReceivableMain(id, body);
+            if (t.equals("finance_payable_main")) handleUpdatePayableMain(id, body);
+
             return n>0?Result.ok("修改成功"):Result.error("记录不存在");
         }catch(Exception e){return Result.error("修改失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
+    }
+
+    private void handleUpdateSalesMain(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> sale = db.queryForMap("SELECT sales_no, total_amount, customer_code, customer_name FROM trade_sales_main WHERE id=?", id);
+            String salesNo = String.valueOf(sale.get("sales_no"));
+            if (sale.get("total_amount") != null) {
+                java.math.BigDecimal amt = new java.math.BigDecimal(sale.get("total_amount").toString());
+                String custCode = String.valueOf(sale.getOrDefault("customer_code", ""));
+                String custName = String.valueOf(sale.getOrDefault("customer_name", ""));
+                db.update("UPDATE finance_receivable_main SET customer_code=?, customer_name=?, total_amount=?, remain_amount=GREATEST(0, total_amount-COALESCE(received_amount,0)) WHERE remark LIKE ?",
+                    custCode, custName, amt, "%" + salesNo + "%");
+                db.update("UPDATE voucher_main SET debit_total=?, credit_total=? WHERE remark LIKE ?", amt, amt, "%" + salesNo + "%");
+                db.update("UPDATE voucher_detail SET debit_amount=? WHERE summary LIKE ? AND subject_code='1122'", amt, "%" + salesNo + "%");
+                db.update("UPDATE voucher_detail SET credit_amount=? WHERE summary LIKE ? AND subject_code='6001'", amt, "%" + salesNo + "%");
+            }
+        } catch (Exception e) {
+            System.err.println("Cascade update sales main warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdatePurchaseMain(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> po = db.queryForMap("SELECT purchase_no, total_amount, supplier_code, supplier_name FROM trade_purchase_main WHERE id=?", id);
+            String purchaseNo = String.valueOf(po.get("purchase_no"));
+            if (po.get("total_amount") != null) {
+                java.math.BigDecimal amt = new java.math.BigDecimal(po.get("total_amount").toString());
+                String suppCode = String.valueOf(po.getOrDefault("supplier_code", ""));
+                String suppName = String.valueOf(po.getOrDefault("supplier_name", ""));
+                db.update("UPDATE finance_payable_main SET supplier_code=?, supplier_name=?, total_amount=?, remain_amount=GREATEST(0, total_amount-COALESCE(paid_amount,0)) WHERE remark LIKE ?",
+                    suppCode, suppName, amt, "%" + purchaseNo + "%");
+                db.update("UPDATE voucher_main SET debit_total=?, credit_total=? WHERE remark LIKE ?", amt, amt, "%" + purchaseNo + "%");
+                db.update("UPDATE voucher_detail SET debit_amount=? WHERE summary LIKE ? AND subject_code='1403'", amt, "%" + purchaseNo + "%");
+                db.update("UPDATE voucher_detail SET credit_amount=? WHERE summary LIKE ? AND subject_code='2202'", amt, "%" + purchaseNo + "%");
+            }
+        } catch (Exception e) {
+            System.err.println("Cascade update purchase main warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdateReceivableMain(Long id, Map<String,Object> body) {
+        try {
+            db.update("UPDATE finance_receivable_main SET remain_amount=GREATEST(0, total_amount-COALESCE(received_amount,0)) WHERE id=?", id);
+        } catch (Exception ignored) {}
+    }
+
+    private void handleUpdatePayableMain(Long id, Map<String,Object> body) {
+        try {
+            db.update("UPDATE finance_payable_main SET remain_amount=GREATEST(0, total_amount-COALESCE(paid_amount,0)) WHERE id=?", id);
+        } catch (Exception ignored) {}
     }
 
     @Transactional
