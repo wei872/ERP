@@ -750,6 +750,7 @@ public class ExportService {
         COL_CN_MAP.put("invoice_type", "发票类型");
         COL_CN_MAP.put("tax_amount", "税额");
         COL_CN_MAP.put("invoice_date", "开票日期");
+        COL_CN_MAP.put("invoice_image", "发票图片");
         COL_CN_MAP.put("budget_no", "预算编号");
         COL_CN_MAP.put("budget_period", "预算期间");
         COL_CN_MAP.put("budget_amount", "预算金额");
@@ -1398,22 +1399,19 @@ public class ExportService {
             StringBuilder csv = new StringBuilder();
             String tableCn = TABLE_CN_MAP.getOrDefault(tableName, tableName);
             String nowStr = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-            csv.append("ERP企业管理系统数据导出 - ").append(tableCn).append(" (").append(tableName).append(") | 导出时间: ").append(nowStr).append("
-");
-            csv.append(String.join(",", cnHeaderCols)).append("
-");
+            csv.append("ERP企业管理系统数据导出 - ").append(tableCn).append(" (").append(tableName).append(") | 导出时间: ").append(nowStr).append("\n");
+            csv.append(String.join(",", cnHeaderCols)).append("\n");
 
             for (Map<String,Object> row : rows) {
                 List<String> vals = new ArrayList<>();
                 for (String c : cols) {
                     Object v = row.get(c);
-                    vals.add(v != null ? """ + v.toString().replace(""", """") + """ : "");
+                    vals.add(v != null ? "\"" + v.toString().replace("\"", "\"\"") + "\"" : "");
                 }
-                csv.append(String.join(",", vals)).append("
-");
+                csv.append(String.join(",", vals)).append("\n");
             }
 
-            // UTF-8 BOM (﻿) 保证 Windows Excel 打开 CSV 时中文编码正常无乱码
+            // UTF-8 BOM (\uFEFF) 保证 Windows Excel 打开 CSV 时中文编码正常无乱码
             byte[] bom = new byte[] { (byte)0xEF, (byte)0xBB, (byte)0xBF };
             byte[] contentBytes = csv.toString().getBytes(StandardCharsets.UTF_8);
             byte[] result = new byte[bom.length + contentBytes.length];
