@@ -232,7 +232,38 @@ export default function FinanceTemplate() {
         )}
       </aside>
 
-      <main className="flex-1 overflow-auto p-6 bg-gray-50">
+      <main className="flex-1 overflow-auto p-6 bg-gray-50 space-y-4">
+        {/* UI 引导与数据联动说明 */}
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3 max-w-6xl mx-auto">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+              <span>💡</span> 财务模版库使用指南与 Excel 转换说明
+            </h3>
+            <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">完整样式与公式保留</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+            <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+              <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+                <span>📝</span> 步骤指引：
+              </div>
+              <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+                <li>左侧选择模版分类与具体的 Excel 模版（如`付款申请表`或`费用报销表`）。</li>
+                <li>在右侧表单或网格中录入数据，点击 **【保存】** 存入数据库实例。</li>
+                <li>点击 **【下载 xlsx】**，下载全保留原始公式与格式的 Excel 文件！</li>
+              </ol>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+              <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+                <span>🔄</span> 自动数据联动：
+              </div>
+              <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+                <li>金额录入 ➔ 自动联动大写金额转化（如 RMB `12,345.00` 自动生成 `壹万贰仟叁佰肆拾伍元整`）。</li>
+                <li>在线保存 ➔ 数据同步写入 `fin_instance`，支持按人员/角色分配模版查阅与导出权限。</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {!selectedTpl ? (
           <div className="h-full flex items-center justify-center text-gray-400 text-sm">请选择左侧模版</div>
         ) : (

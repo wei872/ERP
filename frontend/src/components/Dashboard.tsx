@@ -34,6 +34,37 @@ function ChartCard({ title, children, empty }: { title: string; children: React.
 function n2v(n: any): number { const v = Number(n); return Number.isFinite(v) ? v : 0; }
 function fmt(v: number): string { return v >= 10000 ? `${(v/10000).toFixed(1)}万` : v.toLocaleString(); }
 
+function GuidanceCard({ steps, linkages }: { steps: string[]; linkages: string[] }) {
+  return (
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+          <span>💡</span> 业务操作指南与后台数据联动说明
+        </h3>
+        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">全自动实时同步</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+            <span>📝</span> 界面使用步骤指南：
+          </div>
+          <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+            {steps.map((s, i) => <li key={i}>{s}</li>)}
+          </ol>
+        </div>
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+            <span>🔄</span> 跨模块数据全自动联动：
+          </div>
+          <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+            {linkages.map((l, i) => <li key={i}>{l}</li>)}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { currentUser, users } = useAuth();
   const [data, setData] = useState<any>(null);
@@ -75,6 +106,18 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
+      <GuidanceCard
+        steps={[
+          '第一步：观察顶部 Hero 看板，查看当前在线人员与待审核注册用户。',
+          '第二步：查阅 KPI 指标卡，销售额/采购额/订单数/净利润与实际业务完全一致。',
+          '第三步：悬停趋势图与存货分布图，洞察企业存货占用与周度/月度销售波动。'
+        ]}
+        linkages={[
+          '【销售出库】完成 ➔ 自动累加累计销售总额、总订单数并更新销售趋势图。',
+          '【采购入库】完成 ➔ 自动累加采购总额并更新采购趋势图。',
+          '【期末关账】完成 ➔ 自动提取 4104 科目净利润并同步至经营 KPI 看板。'
+        ]}
+      />
       {/* Hero Banner */}
       <div className="rounded-2xl p-8 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed, #6366f1)' }}>
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '30px 30px' }}></div>

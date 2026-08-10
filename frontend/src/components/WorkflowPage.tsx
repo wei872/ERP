@@ -77,6 +77,39 @@ export default function WorkflowPage() {
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> 工作流审批使用指南与后台数据联动说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">多级引擎 + 账务自动扣连</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>【提交新审批】：选择审批类型，填入关联采购单号或费用金额与事由。</li>
+              <li>在【采购订单主表】也可直接点击行上的 **`🔁 提审批`** 按钮一键发起！</li>
+              <li>【我的待办】：审批人在任务列表中点击【详情】，输入意见后点击【通过】或【驳回】。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>采购审批终结 ➔ 自动将 `trade_purchase_main.purchase_status` 更新为 `'已审批'`。</li>
+              <li>费用审批终结 ➔ 自动记录资金支出 `finance_expense_main`，并**自动生成费用凭证（借:6602管理费用 贷:1002银行存款）**。</li>
+              <li>请假审批终结 ➔ 自动更新 HR 请假记录状态为 `'已批准'`。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-800">🔁 工作流审批</h2>

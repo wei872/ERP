@@ -31,6 +31,39 @@ export default function FinancialStatementsPage() {
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> 三大财务报表使用指南与后台数据联动说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">科目余额实时穿透聚合</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>点击切换【资产负债表】/【利润表】/【现金流量表】。</li>
+              <li>选择会计期间（如 `2026-08`），点击【查询】。</li>
+              <li>查看各科目期末余额明细与会计恒等式校验。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>资产负债表 ➔ 自动按 1/2/4 科目聚合，严格满足 资产 ＝ 负债 ＋ 所有者权益 恒等式。</li>
+              <li>利润表 ➔ 自动按 6 开头损益类科目聚合，算清营业收入、6401 成本与净利润。</li>
+              <li>现金流量表 ➔ 自动按资金流水（`finance_income`/`expense`）计算经营现金净流量。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-xl font-bold text-gray-800">📊 三大财务报表</h2>
         <p className="text-sm text-gray-500 mt-1">按会计期间查询：资产负债表 / 利润表 / 现金流量表（后端基于 account_subject_balance 实时聚合）</p>

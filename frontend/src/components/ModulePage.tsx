@@ -168,6 +168,38 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   return (<div className="p-6 space-y-5 erp-fade-in">
     {toast && <div className="erp-toast">{toast}</div>}
 
+    {/* UI 引导与数据联动说明 */}
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+          <span>💡</span> 【{table.name} ({tableKey})】数据表说明与智能操作
+        </h3>
+        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">ERP 底层实体基座</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+            <span>📝</span> 界面使用指南：
+          </div>
+          <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+            <li>在右上方搜索框中可输入任何关键词，进行后端高效率模糊检索。</li>
+            <li>点击【+ 新增】按钮录入记录，对图片列（如发票图片）支持直接选择本地文件并自动转 Base64 存入数据库。</li>
+            <li>点击【⬇ CSV】按钮可导出纯中文列名 CSV，带 UTF-8 BOM 绝无乱码。</li>
+          </ol>
+        </div>
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+            <span>🔄</span> 单据智能 1-Click 联动快捷键：
+          </div>
+          <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+            {tableKey === 'trade_purchase_main' && <li>行操作【🔁 提审批】➔ 一键推送采购单至工作流；【📦 入库】➔ 一键采购入库重算加权成本！</li>}
+            {tableKey === 'trade_sales_main' && <li>行操作【🚚 出库】➔ 一键销售扣减库存，并全自动生成销售成本记账凭证 (6401/1405)！</li>}
+            {tableKey !== 'trade_purchase_main' && tableKey !== 'trade_sales_main' && <li>上层业务面板（生产管理/出入库/核销/审批）操作时，会自动驱动本表落库与事务更新。</li>}
+          </ul>
+        </div>
+      </div>
+    </div>
+
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <div className="flex items-center gap-2 text-xs text-slate-400 mb-1.5">

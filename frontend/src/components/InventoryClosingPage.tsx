@@ -59,6 +59,39 @@ export default function InventoryClosingPage() {
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1200px] mx-auto">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> 库存直调与期末结账使用指南与后台数据联动说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">期末损益自动冲销</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>【库存直调】：用于盘点快速修正库存，选择商品编码与仓库，输入数量点击【执行】。</li>
+              <li>【月末结账】：选择会计期间（如 `2026-08`），点击【月结】，系统自动关账。</li>
+              <li>【年终结账】：选择年份，点击【年结】，完成年度损益结转。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>库存直调 ➔ 采用 `FOR UPDATE` 行排他锁重算 `trade_inventory_balance` 并记录日志。</li>
+              <li>月结完成 ➔ 自动清零损益类科目（6开头），计算净利润转入 `4104 本年利润` 科目。</li>
+              <li>年结完成 ➔ 自动将 `4104` 余额结转至 `4103 未分配利润` 科目。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-xl font-bold text-gray-800">🛠️ 库存直调 & 期末结账</h2>
         <p className="text-sm text-gray-500 mt-1">绕过主从表快速调整库存 + 期间月结/年终结账</p>

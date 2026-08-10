@@ -36,6 +36,38 @@ export default function ReportPage() {
   const kpi = data?.kpi || {};
 
   return (<div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
+    {/* UI 引导与联动卡片 */}
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+          <span>💡</span> 报表中心使用指南与后台数据联动说明
+        </h3>
+        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">全量实时穿透计算</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+            <span>📝</span> 步骤指引：
+          </div>
+          <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+            <li>顶部切换【周/月/年】聚合维度，查看不同时间跨度的数据趋势。</li>
+            <li>点击中部 6 大维度标签（销售/采购/库存/财务/生产/人力），查看特定领域走势。</li>
+            <li>悬停柱状图与饼图区域，可精确穿透查看具体金额与占比。</li>
+          </ol>
+        </div>
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+            <span>🔄</span> 自动数据联动：
+          </div>
+          <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+            <li>销售出库 / 采购入库完成 ➔ 自动实时重算销售/采购趋势与 TOP8 热销品。</li>
+            <li>生产领料 / 完工结算完成 ➔ 实时更新生产报表与库存价值汇总。</li>
+            <li>财务核销与期末关账完成 ➔ 实时更新财务收入支出与净利润 KPI。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h2 className="text-xl font-bold text-gray-800">📊 报表中心</h2><p className="text-sm text-gray-500 mt-1">数据全部来自业务表实时聚合，按周/月/年查看公司运营状况</p></div><div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-sm border border-gray-100">{(['weekly','monthly','yearly'] as TimePeriod[]).map(p=>(<button key={p} onClick={()=>setPeriod(p)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${period===p?'bg-blue-500 text-white shadow-sm':'text-gray-500 hover:bg-gray-50'}`}>{PERIOD_LABELS[p]}</button>))}</div></div>
     <div className="flex gap-2 overflow-x-auto pb-2">{Object.entries(tabMeta).map(([key, report])=>(<button key={key} onClick={()=>setActiveTab(key)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab===key?'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg':'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}><span>{report.icon}</span>{report.title}</button>))}</div>
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"><div className="flex items-center justify-between mb-6"><h3 className="font-semibold text-gray-800 text-lg">{current.icon} {current.title} - {PERIOD_LABELS[period]}趋势</h3></div><ResponsiveContainer width="100%" height={360}><ComposedChart data={chartData}><defs><linearGradient id={`grad-${activeTab}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={current.color} stopOpacity={0.2}/><stop offset="95%" stopColor={current.color} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/><XAxis dataKey="name" tick={{fontSize:11}} stroke="#9ca3af"/><YAxis tick={{fontSize:11}} stroke="#9ca3af" tickFormatter={fmt}/><Tooltip formatter={(v:any)=>[`¥${fmt(Number(v))}`,current.title]}/><Area type="monotone" dataKey="value" fill={`url(#grad-${activeTab})`} stroke={current.color} strokeWidth={2}/><Bar dataKey="value" fill={current.color} opacity={0.3} radius={[4,4,0,0]}/></ComposedChart></ResponsiveContainer>{chartData.length===0&&<p className="text-center text-sm text-gray-400 mt-2">暂无{current.title}数据</p>}</div>

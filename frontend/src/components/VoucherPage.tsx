@@ -62,6 +62,39 @@ export default function VoucherPage() {
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> 会计凭证使用指南与后台数据联动说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">借贷强平衡校验</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>选择凭证字（如`记`）与会计期间（如 `2026-08`）。</li>
+              <li>添加多行借贷明细（录入科目编码、借/贷金额与摘要）。系统自动提示【借方金额 ＝ 贷方金额】。</li>
+              <li>校验平衡无误后，点击【保存凭证】完成总账落库。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>出库/核销/领料/费用审批通过 ➔ 均已在后台**自动实时生成记账凭证**。</li>
+              <li>凭证保存成功 ➔ 实时更新 `account_subject_balance` 科目余额表。</li>
+              <li>本页生成的所有凭证 ➔ 实时参与三大财务报表（资产负债/利润/现金流量）计算。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-xl font-bold text-gray-800">📒 会计凭证</h2>
         <p className="text-sm text-gray-500 mt-1">手工录入凭证（借贷必须平衡）+ 从销售/采购单自动生成凭证</p>

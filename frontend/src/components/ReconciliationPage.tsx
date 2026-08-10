@@ -65,6 +65,39 @@ export default function ReconciliationPage() {
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> 应收应付核销使用指南与后台数据联动说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">资金流水 + 记账凭证全联动</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>切换顶部【应收单】或【应付单】查看客户打款/供应商付款待处理清单。</li>
+              <li>在目标行点击 **【核销】** 按钮。</li>
+              <li>在弹窗中确认或修改本次实收/实付金额，点击 **【确认核销】**。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>核销完成 ➔ 自动向 `finance_income`/`expense` 写入资金流水，单据置为 `已核销`。</li>
+              <li>应收核销完成 ➔ **自动生成收款凭证（借:1002银行存款 贷:1122应收账款）**。</li>
+              <li>应付核销完成 ➔ **自动生成付款凭证（借:2202应付账款 贷:1002银行存款）**，并实时更新总账科目余额。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div>
         <h2 className="text-xl font-bold text-gray-800">💸 应收应付核销</h2>
         <p className="text-sm text-gray-500 mt-1">基于 finance_receivable_main / finance_payable_main 真实核销：累加已收/已付、更新余额与状态、同步资金流水</p>

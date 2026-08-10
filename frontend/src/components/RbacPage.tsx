@@ -76,6 +76,38 @@ export default function RbacPage() {
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
       {toast && <div className="erp-toast">{toast}</div>}
+
+      {/* UI 引导与数据联动说明 */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+            <span>💡</span> RBAC 权限矩阵使用指南与控制说明
+          </h3>
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">角色 × 菜单粒度</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+              <span>📝</span> 步骤指引：
+            </div>
+            <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+              <li>在上方按钮中选择要配置的系统角色（如`销售`、`仓管`、`会计`等）。</li>
+              <li>在下表中针对具体的业务菜单，勾选【查看】/【新增】/【编辑】/【删除】复选框。</li>
+              <li>点击右上角 **【💾 保存权限】**，权限存入 RBAC 关联表。</li>
+            </ol>
+          </div>
+          <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+            <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+              <span>🔄</span> 自动数据联动：
+            </div>
+            <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+              <li>保存成功 ➔ 数据写入 `sys_role_menu` 表。</li>
+              <li>角色账号再次登录 ➔ 侧边栏导航与按钮权限按矩阵设置精准隐现。</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-800">🛡️ RBAC 角色权限矩阵</h2>

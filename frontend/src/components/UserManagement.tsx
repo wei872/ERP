@@ -82,6 +82,38 @@ export default function UserManagement() {
   if (currentUser?.role !== 'admin') return <div className="p-6"><div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center"><div className="text-4xl mb-3">🔒</div><h3 className="text-lg font-semibold text-red-700">权限不足</h3><p className="text-sm text-red-500 mt-1">用户管理功能仅主账号可使用</p></div></div>;
 
   return (<div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
+    {/* UI 引导与数据联动说明 */}
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+          <span>💡</span> 用户与权限管理使用指南与权限控制说明
+        </h3>
+        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">管理员专用视角</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-amber-300 flex items-center gap-1.5">
+            <span>📝</span> 步骤指引：
+          </div>
+          <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-200">
+            <li>【待审核】：点击【✓ 通过审核】激活新注册账号。</li>
+            <li>【全部用户】：在目标用户行点击【权限】，进入该用户模块细粒度配置。</li>
+            <li>【模块权限】与【财务模版权限】：独立勾选读/写/删权限后点击【保存权限】。</li>
+          </ol>
+        </div>
+        <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
+          <div className="font-semibold text-emerald-300 flex items-center gap-1.5">
+            <span>🔄</span> 自动数据联动：
+          </div>
+          <ul className="list-disc list-inside space-y-1 pl-1 text-slate-200">
+            <li>通过审核 ➔ 账号状态更新为 `active`，允许登录并按角色看到左侧菜单。</li>
+            <li>保存模块权限 ➔ 实时更新后端 `sys_user.permissions` JSON，严格控制数据 API 读写边界。</li>
+            <li>保存财务模版权限 ➔ 实时更新 `fin_template_perm` 独立控制 Excel 模版下载与填报。</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
     <div className="flex items-center justify-between"><div><h2 className="text-xl font-bold text-gray-800">👤 用户与权限管理</h2><p className="text-sm text-gray-500 mt-1">管理所有副账号，审核注册申请，配置操作权限</p></div><div className="flex gap-3"><div className="bg-white rounded-xl p-3 shadow-sm border text-center min-w-[80px]"><div className="text-lg font-bold text-blue-600">{subUsers.length}</div><div className="text-[10px] text-gray-400">总用户</div></div><div className="bg-white rounded-xl p-3 shadow-sm border text-center min-w-[80px]"><div className="text-lg font-bold text-emerald-600">{users.filter(u => u.status === 'active' && u.role !== 'admin').length}</div><div className="text-[10px] text-gray-400">已激活</div></div><div className="bg-white rounded-xl p-3 shadow-sm border text-center min-w-[80px]"><div className="text-lg font-bold text-amber-600">{pendingUsers.length}</div><div className="text-[10px] text-gray-400">待审核</div></div></div></div>
     <div className="flex gap-2 flex-wrap"><button onClick={() => setActiveTab('list')} className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'list' ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>全部用户 ({subUsers.length})</button><button onClick={() => setActiveTab('pending')} className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all flex items-center gap-2 ${activeTab === 'pending' ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>待审核 {pendingUsers.length > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{pendingUsers.length}</span>}</button>{selected && <button onClick={() => { setActiveTab('permissions'); initPerms(selected); }} className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'permissions' ? 'bg-gradient-to-r from-purple-500 to-pink-600 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>模块权限 - {selected.realName}</button>}{selected && <button onClick={() => { setActiveTab('finperms'); loadFinPerms(selected.id); }} className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'finperms' ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-sm' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}>财务模版权限 - {selected.realName}</button>}</div>
 
