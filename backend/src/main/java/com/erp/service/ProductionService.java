@@ -50,11 +50,24 @@ public class ProductionService {
     /** 生产入库 → 更新库存 + 更新工单完成量 + 成本结算 */
     @Transactional
     public Map<String,Object> recordWarehousing(String workOrderNo, BigDecimal actualInQty, String warehouse, String operator) {
-        if (workOrderNo == null || workOrderNo.isEmpty()) throw new RuntimeException("工单号不能为空");
-        Map<String,Object> wo = db.queryForMap("SELECT * FROM prod_work_order WHERE work_order_no=?", workOrderNo);
+        if (workOrderNo == null || workOrderNo.trim().isEmpty()) throw new RuntimeException("工单号不能为空");
+        Map<String,Object> wo;
+        try {
+            wo = db.queryForMap("SELECT * FROM prod_work_order WHERE work_order_no=?", workOrderNo.trim());
+        } catch (Exception e) {
+            throw new RuntimeException("未能找到单号为 [" + workOrderNo + "] 的生产工单，请检查单号或在工单列表中直接选择！");
+        }
+
         String productCode = String.valueOf(wo.get("product_code"));
         String productName = String.valueOf(wo.get("product_name"));
         String specModel = String.valueOf(wo.getOrDefault("spec_model",""));
+
+        // 查询物料单位成本（非零成本）
+        BigDecimal unitCost = BigDecimal.ZERO;
+        try {
+            BigDecimal c = db.queryForObject("SELECT COALESCE(unit_cost,0) FROM trade_goods_main WHERE product_code=? LIMIT 1", BigDecimal.class, productCode);
+            if (c != null && c.signum() > 0) unitCost = c;
+        } catch (Exception ignored) {}
 
         String inNo = "PWI-" + System.currentTimeMillis();
         db.update("INSERT INTO prod_warehousing(in_no,ref_work_order,product_code,product_name,spec_model,plan_in_qty,actual_in_qty,unit,warehouse,in_date,handler,reviewer,review_date) VALUES(?,?,?,?,?,?,?,'件',?,CURDATE(),?,NULL,NULL)",
@@ -62,9 +75,8 @@ public class ProductionService {
             new BigDecimal(wo.get("plan_qty").toString()), actualInQty,
             warehouse == null ? "默认仓" : warehouse, operator == null ? "系统" : operator);
 
-        // 库存入库（加权平均）
-        inventory.stockIn(productCode, productName, specModel, warehouse == null ? "默认仓" : warehouse, "", actualInQty,
-            BigDecimal.ZERO);
+        // 库存入库（按产品成本加权平均）
+        inventory.stockIn(productCode, productName, specModel, warehouse == null ? "默认仓" : warehouse, "", actualInQty, unitCost);
 
         // 更新工单完成量
         db.update("UPDATE prod_work_order SET actual_qty=actual_qty+?, complete_qty=complete_qty+? WHERE work_order_no=?",
@@ -143,10 +155,17 @@ public class ProductionService {
     /** 领料确认：从指定领料单扣减库存，并自动联动直接材料成本凭证(5001/1403) */
     @Transactional
     public void confirmRequisition(String reqNo, BigDecimal actualQty, String warehouse, String operator) {
-        Map<String,Object> req = db.queryForMap("SELECT * FROM prod_material_requisition WHERE req_no=?", reqNo);
+        if (reqNo == null || reqNo.trim().isEmpty()) throw new RuntimeException("领料单号不能为空");
+        Map<String,Object> req;
+        try {
+            req = db.queryForMap("SELECT * FROM prod_material_requisition WHERE req_no=?", reqNo.trim());
+        } catch (Exception e) {
+            throw new RuntimeException("未能找到单号为 [" + reqNo + "] 的领料单，请检查单号或在列表中直接选择！");
+        }
+
         String productCode = String.valueOf(req.get("product_code"));
         inventory.stockOut(productCode, warehouse, actualQty);
-        db.update("UPDATE prod_material_requisition SET actual_req_qty=actual_req_qty+? WHERE req_no=?", actualQty, reqNo);
+        db.update("UPDATE prod_material_requisition SET actual_req_qty=actual_req_qty+? WHERE req_no=?", actualQty, reqNo.trim());
 
         // 获取该物料的当前成本，自动联动生产领料凭证 (借: 5001 生产成本, 贷: 1403 原材料)
         BigDecimal unitCost = BigDecimal.ZERO;
