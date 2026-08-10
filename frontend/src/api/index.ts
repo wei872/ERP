@@ -46,6 +46,8 @@ export const bizApi = {
   yearClose: (year: string) => request('/biz/year-close', { method: 'POST', body: JSON.stringify({ year }) }),
   mrpCalc: (productCode: string, qty: number) => request('/biz/mrp-calc', { method: 'POST', body: JSON.stringify({ product_code: productCode, qty }) }),
   mrpRollupCost: (productCode: string) => request<{ cost: number }>(`/biz/mrp-rollup-cost?product_code=${encodeURIComponent(productCode)}`),
+  mrpToPurchase: (calcCode: string) => request('/biz/mrp-to-purchase', { method: 'POST', body: JSON.stringify({ calc_code: calcCode }) }),
+  mrpToWorkOrder: (calcCode: string) => request('/biz/mrp-to-work-order', { method: 'POST', body: JSON.stringify({ calc_code: calcCode }) }),
   stockIn: (body: Record<string, unknown>) => request('/biz/stock-in', { method: 'POST', body: JSON.stringify(body) }),
   stockOut: (body: Record<string, unknown>) => request('/biz/stock-out', { method: 'POST', body: JSON.stringify(body) }),
   stockInFromPurchase: (id: number) => request(`/biz/stock-in-from-purchase/${id}`, { method: 'POST' }),

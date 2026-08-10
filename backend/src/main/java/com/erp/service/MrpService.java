@@ -12,6 +12,7 @@ import java.util.*;
 public class MrpService {
 
     @Autowired private JdbcTemplate db;
+    @Autowired private ProductionService production;
 
     /** MRP净需求计算：净需求 = 总需求 - 现有库存 - 在途 + 安全库存(min_stock)。
      *  在途 = 已下单未入库的采购在单数量 */
@@ -72,6 +73,65 @@ public class MrpService {
                 System.err.println("MRP insert failed for " + matCode + ": " + e.getMessage());
             }
         }
+    }
+
+    /** 从 MRP 计算结果一键拉起采购订单 */
+    @Transactional
+    public Map<String,Object> generatePurchaseFromMrp(String calcCode, String operator) {
+        Map<String,Object> mrp = db.queryForMap("SELECT * FROM prod_mrp_calc WHERE calc_code=?", calcCode);
+        BigDecimal suggestPur = toBD(mrp.get("suggest_purchase"));
+        if (suggestPur.compareTo(BigDecimal.ZERO) <= 0) suggestPur = toBD(mrp.get("net_demand"));
+        if (suggestPur.compareTo(BigDecimal.ZERO) <= 0) throw new RuntimeException("建议采购数量须大于0");
+
+        String pCode = String.valueOf(mrp.get("product_code"));
+        String pName = String.valueOf(mrp.getOrDefault("product_name", pCode));
+        String spec = String.valueOf(mrp.getOrDefault("spec_model", ""));
+
+        BigDecimal price = BigDecimal.ZERO;
+        String supplierCode = "SUPP-001", supplierName = "默认供应商";
+        try {
+            Map<String,Object> g = db.queryForMap("SELECT unit_cost, purchase_price, supplier_code, supplier_name FROM trade_goods_main WHERE product_code=?", pCode);
+            price = toBD(g.getOrDefault("purchase_price", g.getOrDefault("unit_cost", 0)));
+            if (g.get("supplier_name") != null) supplierName = String.valueOf(g.get("supplier_name"));
+        } catch (Exception ignored) {}
+
+        String poNo = "PO-MRP-" + System.currentTimeMillis();
+        BigDecimal totalAmt = suggestPur.multiply(price).setScale(2, RoundingMode.HALF_UP);
+        db.update("INSERT INTO trade_purchase_main(purchase_no,supplier_code,supplier_name,purchase_date,delivery_date,total_amount,purchase_status,arrival_status,buyer) VALUES(?,?,?,CURDATE(),DATE_ADD(CURDATE(),INTERVAL 7 DAY),?,'已下单','待到货',?)",
+            poNo, supplierCode, supplierName, totalAmt, operator == null ? "系统" : operator);
+        db.update("INSERT INTO trade_purchase_detail(purchase_no,product_code,product_name,spec_model,qty,unit_price,total_amount) VALUES(?,?,?,?,?,?,?)",
+            poNo, pCode, pName, spec, suggestPur, price, totalAmt);
+
+        db.update("UPDATE prod_mrp_calc SET calc_status='已转采购' WHERE calc_code=?", calcCode);
+
+        Map<String,Object> res = new HashMap<>();
+        res.put("purchase_no", poNo);
+        res.put("product_code", pCode);
+        res.put("qty", suggestPur);
+        res.put("status", "已转采购单");
+        return res;
+    }
+
+    /** 从 MRP 计算结果一键拉起生产工单 */
+    @Transactional
+    public Map<String,Object> generateWorkOrderFromMrp(String calcCode, String operator) {
+        Map<String,Object> mrp = db.queryForMap("SELECT * FROM prod_mrp_calc WHERE calc_code=?", calcCode);
+        BigDecimal suggestProd = toBD(mrp.get("suggest_produce"));
+        if (suggestProd.compareTo(BigDecimal.ZERO) <= 0) suggestProd = toBD(mrp.get("net_demand"));
+        if (suggestProd.compareTo(BigDecimal.ZERO) <= 0) throw new RuntimeException("建议生产数量须大于0");
+
+        String pCode = String.valueOf(mrp.get("product_code"));
+        String spec = String.valueOf(mrp.getOrDefault("spec_model", ""));
+
+        Map<String,Object> woRes = production.createWorkOrder("PLAN-MRP-" + System.currentTimeMillis(), pCode, spec, suggestProd, "默认车间", operator);
+        db.update("UPDATE prod_mrp_calc SET calc_status='已转生产' WHERE calc_code=?", calcCode);
+
+        Map<String,Object> res = new HashMap<>();
+        res.put("work_order_no", woRes.get("work_order_no"));
+        res.put("product_code", pCode);
+        res.put("qty", suggestProd);
+        res.put("status", "已转生产工单");
+        return res;
     }
 
     /** BOM 成本滚算：从原材料向上累计 unit_price * qty，BOM 多级递归累加 */

@@ -106,6 +106,28 @@ public class BizController {
         catch (Exception e) { return Result.error("BOM成本滚算失败: " + e.getMessage()); }
     }
 
+    @PostMapping("/mrp-to-purchase") public Result mrpToPurchase(@RequestBody Map<String,String> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"procurement".equals(role(req)) && !"production".equals(role(req))) return Result.error("权限不足");
+        try {
+            String calcCode = body.get("calc_code");
+            if (calcCode == null || calcCode.isEmpty()) return Result.error("计算单号不能为空");
+            Map<String,Object> r = mrp.generatePurchaseFromMrp(calcCode, user(req));
+            audit.log(user(req), "MRP", "MRP转采购单", calcCode, audit.getIp(req));
+            return Result.ok(r);
+        } catch (Exception e) { return Result.error("MRP转采购失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/mrp-to-work-order") public Result mrpToWorkOrder(@RequestBody Map<String,String> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"production".equals(role(req))) return Result.error("权限不足");
+        try {
+            String calcCode = body.get("calc_code");
+            if (calcCode == null || calcCode.isEmpty()) return Result.error("计算单号不能为空");
+            Map<String,Object> r = mrp.generateWorkOrderFromMrp(calcCode, user(req));
+            audit.log(user(req), "MRP", "MRP转生产工单", calcCode, audit.getIp(req));
+            return Result.ok(r);
+        } catch (Exception e) { return Result.error("MRP转工单失败: " + e.getMessage()); }
+    }
+
     // ── 生产管理 ──
     @PostMapping("/production/work-order") public Result createWorkOrder(@RequestBody Map<String,Object> body, HttpServletRequest req) {
         if (!"admin".equals(role(req)) && !"production".equals(role(req))) return Result.error("权限不足");

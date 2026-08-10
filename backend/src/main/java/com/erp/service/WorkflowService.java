@@ -5,12 +5,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
+import java.text.SimpleDateFormat;
 import java.util.*;
 
 @Service
 public class WorkflowService {
 
     @Autowired private JdbcTemplate db;
+    @Autowired private FinanceService finance;
 
     /** 各审批类型的节点序列（assignee 当前简化为 admin，后续可按部门/职位指派） */
     private static final Map<String, List<String>> NODE_TEMPLATES = new HashMap<>();
@@ -68,8 +70,23 @@ public class WorkflowService {
             } else if ("费用审批".equals(type)) {
                 db.update("UPDATE oa_expense_approval SET approval_status='已通过', approver=? WHERE approval_no=?", approver, approvalNo);
                 BigDecimal amt = row.get("amount") != null ? new BigDecimal(row.get("amount").toString()) : BigDecimal.ZERO;
+                String expNo = "EXP-" + System.currentTimeMillis();
                 db.update("INSERT INTO finance_expense_main(expense_no,expense_type,amount,expense_date,status,remark) VALUES(?,?,?,CURDATE(),'已确认',?)",
-                    "EXP-" + System.currentTimeMillis(), type, amt, "审批通过自动生成: " + approvalNo);
+                    expNo, type, amt, "审批通过自动生成: " + approvalNo);
+
+                // 自动联动会计记账凭证 (借: 6602 管理费用, 贷: 1002 银行存款)
+                if (amt.signum() > 0) {
+                    String vn = "VZ-EXP-" + System.currentTimeMillis();
+                    String period = new SimpleDateFormat("yyyy-MM").format(new Date());
+                    db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
+                        vn, period, amt, amt, "费用审批通过自动凭证:" + approvalNo);
+                    db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'6602','管理费用',?,0,?)",
+                        vn, amt, "费用报销-" + approvalNo);
+                    db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1002','银行存款',0,?,?)",
+                        vn, amt, "费用支出-" + expNo);
+                    finance.updateBalance("6602", "管理费用", amt, BigDecimal.ZERO);
+                    finance.updateBalance("1002", "银行存款", BigDecimal.ZERO, amt);
+                }
             } else if ("请假审批".equals(type)) {
                 db.update("UPDATE oa_leave_approval SET approval_status='已通过', approver=? WHERE approval_no=?", approver, approvalNo);
                 db.update("UPDATE hr_attendance_leave SET status='已批准' WHERE approval_no=?", approvalNo);
