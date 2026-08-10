@@ -43,7 +43,13 @@ public class ExportService {
                 }
                 csv.append(String.join(",", vals)).append("\n");
             }
-            return csv.toString().getBytes(StandardCharsets.UTF_8);
+            // UTF-8 BOM (\uFEFF) 保证 Windows Excel 打开 CSV 时中文编码无乱码
+            byte[] bom = new byte[] { (byte)0xEF, (byte)0xBB, (byte)0xBF };
+            byte[] contentBytes = csv.toString().getBytes(StandardCharsets.UTF_8);
+            byte[] result = new byte[bom.length + contentBytes.length];
+            System.arraycopy(bom, 0, result, 0, bom.length);
+            System.arraycopy(contentBytes, 0, result, bom.length, contentBytes.length);
+            return result;
         } catch (Exception e) {
             return ("Export error: " + e.getMessage()).getBytes(StandardCharsets.UTF_8);
         }

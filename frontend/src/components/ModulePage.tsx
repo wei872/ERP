@@ -115,6 +115,27 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     setLoading(false);
   }, [currentPage, search, fetchData, toastFn]);
 
+  const handleApprovalLink = useCallback(async (row: Record<string, unknown>) => {
+    const refNo = String((row as any).purchase_no || (row as any).sales_no || '');
+    const amount = Number((row as any).total_amount || 0);
+    if (!refNo) return;
+    setLoading(true);
+    try {
+      await bizApi.submitApproval({
+        type: '采购审批',
+        dept: currentUser?.department || '采购部',
+        refNo,
+        amount,
+        remark: '单据一键提报审批: ' + refNo
+      });
+      toastFn('✅ 已成功发起工作流审批！单号: ' + refNo);
+      fetchData(currentPage, search);
+    } catch (e: any) {
+      toastFn('❌ 发起审批失败: ' + (e.message || '系统错误'));
+    }
+    setLoading(false);
+  }, [currentUser, currentPage, search, fetchData, toastFn]);
+
   const handleDelete = useCallback(async () => {
     if (!activeRow) return; setLoading(true);
     try { const ri = (activeRow as any).id; await dataApi.delete(tableKey, Number(ri)); fetchData(currentPage, search); toastFn('删除成功'); }
@@ -173,6 +194,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
               </td>; })}
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
                 <div className="flex items-center justify-center gap-1.5">
+                  {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
                   <button onClick={() => openModal('view', row)} className="px-2.5 py-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors font-medium">查看</button>
