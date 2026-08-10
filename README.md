@@ -71,7 +71,7 @@ erp/
 │       ├── java/com/erp/
 │       │   ├── ErpApplication.java
 │       │   ├── config/         ← SecurityConfig（permitAll）/ CorsConfig / WebConfig
-│       │   ├── security/       ← JwtUtil + JwtFilter（生效）/ JwtUtils + JwtAuthenticationFilter（死代码）
+│       │   ├── security/       ← JwtUtil + JwtFilter（核心 Token 校验与拦截）
 │       │   ├── model/Result.java
 │       │   ├── controller/    ← AuthController / DataController / BizController
 │       │   └── service/       ← 13 个业务 Service（Workflow/Mrp/Inventory/Finance/...）

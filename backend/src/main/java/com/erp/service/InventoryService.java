@@ -17,13 +17,16 @@ public class InventoryService {
     public void stockIn(String productCode, String productName, String specModel, String warehouse, String location, BigDecimal inQty, BigDecimal inPrice) {
         if (inQty.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        // 查询当前库存（数量+金额）
-        java.util.List<java.util.Map<String,Object>> rows = db.queryForList("SELECT qty,total_value FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", productCode, warehouse);
+        // 查询当前库存（行锁 FOR UPDATE 防并发竞争）
+        java.util.List<java.util.Map<String,Object>> rows = db.queryForList("SELECT qty,total_value,product_name,spec_model FROM trade_inventory_balance WHERE product_code=? AND warehouse=? FOR UPDATE", productCode, warehouse);
 
         BigDecimal oldQty = BigDecimal.ZERO, oldValue = BigDecimal.ZERO;
+        String curName = productName, curSpec = specModel;
         if (!rows.isEmpty()) {
             oldQty = new BigDecimal(rows.get(0).get("qty").toString());
             oldValue = new BigDecimal(rows.get(0).get("total_value").toString());
+            if (curName == null || curName.isEmpty()) curName = String.valueOf(rows.get(0).getOrDefault("product_name", productCode));
+            if (curSpec == null || curSpec.isEmpty()) curSpec = String.valueOf(rows.get(0).getOrDefault("spec_model", ""));
         }
 
         // 加权平均：新总额 = 旧总额 + 入库数量*单价，新均价 = 新总额 / 新总量
@@ -36,11 +39,11 @@ public class InventoryService {
                 newQty, newCost, newValue, productCode, warehouse);
         } else {
             db.update("INSERT INTO trade_inventory_balance(product_code,product_name,spec_model,warehouse,location,qty,unit_cost,total_value,min_stock,stock_status) VALUES(?,?,?,?,?,?,?,?,10,'正常')",
-                productCode, productName, specModel, warehouse, location, newQty, newCost, newValue);
+                productCode, curName == null ? productCode : curName, curSpec == null ? "" : curSpec, warehouse, location, newQty, newCost, newValue);
         }
 
         db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,change_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'入库',?,?,?,CURDATE())",
-            "LOG-" + System.currentTimeMillis(), productCode, productName, warehouse, inQty, "IN-" + System.currentTimeMillis(), "系统");
+            "LOG-" + System.currentTimeMillis(), productCode, curName == null ? productCode : curName, warehouse, inQty, "IN-" + System.currentTimeMillis(), "系统");
     }
 
     /** 出库 — 按比例扣减 */
@@ -48,11 +51,13 @@ public class InventoryService {
     public void stockOut(String productCode, String warehouse, BigDecimal outQty) {
         if (outQty.compareTo(BigDecimal.ZERO) <= 0) return;
 
-        java.util.List<java.util.Map<String,Object>> rows = db.queryForList("SELECT qty,total_value FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", productCode, warehouse);
+        // 行锁 FOR UPDATE 防并发超扣
+        java.util.List<java.util.Map<String,Object>> rows = db.queryForList("SELECT qty,total_value,product_name FROM trade_inventory_balance WHERE product_code=? AND warehouse=? FOR UPDATE", productCode, warehouse);
         if (rows.isEmpty()) throw new RuntimeException("库存不存在: " + productCode + " @" + warehouse);
 
         BigDecimal curQty = new BigDecimal(rows.get(0).get("qty").toString());
         BigDecimal curValue = new BigDecimal(rows.get(0).get("total_value").toString());
+        String curName = String.valueOf(rows.get(0).getOrDefault("product_name", productCode));
         if (curQty.compareTo(outQty) < 0) throw new RuntimeException("库存不足: 当前" + curQty + " 出库" + outQty);
 
         // 按比例扣减：新总额 = 旧总额 × (新数量/旧数量)
@@ -65,6 +70,6 @@ public class InventoryService {
             newQty, newCost, newValue, productCode, warehouse);
 
         db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,change_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'出库',?,?,?,CURDATE())",
-            "LOG-" + System.currentTimeMillis(), productCode, productCode, warehouse, outQty, "OUT-" + System.currentTimeMillis(), "系统");
+            "LOG-" + System.currentTimeMillis(), productCode, curName, warehouse, outQty, "OUT-" + System.currentTimeMillis(), "系统");
     }
 }

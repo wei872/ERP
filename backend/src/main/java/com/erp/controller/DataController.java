@@ -10,6 +10,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 @RestController
@@ -19,6 +20,8 @@ public class DataController {
     @Autowired private JdbcTemplate db; @Autowired private DataSource ds;
     @Autowired private AuditService audit; @Autowired private FinanceService finance; @Autowired private InventoryService inventory;
     private static final Pattern VALID = Pattern.compile("^[a-z][a-z0-9_]{2,60}$");
+    private static final Pattern COL_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{1,64}$");
+    private static final Map<String, List<String>> TEXT_COLS_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Set<String>> TABLE_ROLE_MAP = new LinkedHashMap<>();
     static {
         TABLE_ROLE_MAP.put("trade_", new HashSet<>(Arrays.asList("admin","sales","warehouse","procurement")));
@@ -37,6 +40,26 @@ public class DataController {
         TABLE_ROLE_MAP.put("sys_", new HashSet<>(Arrays.asList("admin")));
         TABLE_ROLE_MAP.put("fin_", new HashSet<>(Arrays.asList("admin","accounting")));
     }
+
+    private List<String> getTextColumns(String t) {
+        return TEXT_COLS_CACHE.computeIfAbsent(t, tbl -> {
+            List<String> cols = new ArrayList<>();
+            try (Connection c = ds.getConnection()) {
+                ResultSet rs = c.getMetaData().getColumns(null, null, tbl, null);
+                while (rs.next()) {
+                    String typeName = rs.getString("TYPE_NAME");
+                    if (typeName != null && typeName.toUpperCase().matches(".*(CHAR|TEXT).*")) {
+                        String col = rs.getString("COLUMN_NAME");
+                        if (COL_PATTERN.matcher(col).matches()) {
+                            cols.add(col);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+            return cols;
+        });
+    }
+
     private boolean canRead(String role, String table) {
         if ("admin".equals(role)) return true;
         for (Map.Entry<String, java.util.Set<String>> e : TABLE_ROLE_MAP.entrySet()) {
@@ -91,10 +114,16 @@ public class DataController {
             StringBuilder where=new StringBuilder();
             List<Object> params=new ArrayList<>();
             if(!search.isEmpty()){
-                List<String> cols=new ArrayList<>();
-                try(Connection c=ds.getConnection()){ResultSet rs=c.getMetaData().getColumns(null,null,t,null);
-                while(rs.next()){if(rs.getString("TYPE_NAME").toUpperCase().matches(".*(CHAR|TEXT).*"))cols.add(rs.getString("COLUMN_NAME"));}}catch(Exception ignored){}
-                if(!cols.isEmpty()){where.append(" WHERE (");for(int i=0;i<cols.size();i++){if(i>0)where.append(" OR ");where.append("`").append(cols.get(i)).append("` LIKE ?");params.add("%"+search+"%");}where.append(")");}
+                List<String> cols = getTextColumns(t);
+                if(!cols.isEmpty()){
+                    where.append(" WHERE (");
+                    for(int i=0;i<cols.size();i++){
+                        if(i>0)where.append(" OR ");
+                        where.append("`").append(cols.get(i)).append("` LIKE ?");
+                        params.add("%"+search+"%");
+                    }
+                    where.append(")");
+                }
             }
             Long total=db.queryForObject("SELECT COUNT(*) FROM "+t+where,Long.class,params.toArray());
             params.add(size);params.add((page-1)*size);
@@ -119,8 +148,16 @@ public class DataController {
             if(body.isEmpty())return Result.error("数据为空");
             StringBuilder sb=new StringBuilder("INSERT INTO "+t+" ("),vb=new StringBuilder(" VALUES (");
             List<Object> params=new ArrayList<>();boolean first=true;
-            for(Map.Entry<String,Object> e:body.entrySet()){if("id".equals(e.getKey())||"_rowId".equals(e.getKey()))continue;
-                if(!first){sb.append(",");vb.append(",");}sb.append("`").append(e.getKey()).append("`");vb.append("?");params.add(e.getValue());first=false;}
+            for(Map.Entry<String,Object> e:body.entrySet()){
+                String k = e.getKey();
+                if("id".equals(k)||"_rowId".equals(k))continue;
+                if(!COL_PATTERN.matcher(k).matches()) continue;
+                if(!first){sb.append(",");vb.append(",");}
+                sb.append("`").append(k).append("`");
+                vb.append("?");
+                params.add(e.getValue());
+                first=false;
+            }
             if(params.isEmpty())return Result.error("无可插入字段");
             sb.append(")").append(vb).append(")");db.update(sb.toString(),params.toArray());
             Long newId=db.queryForObject("SELECT LAST_INSERT_ID()",Long.class);
@@ -141,8 +178,15 @@ public class DataController {
         if(!canWrite(String.valueOf(req.getAttribute("role")), table)) return Result.error("权限不足");
         try{String t=safe(table);
             StringBuilder sb=new StringBuilder("UPDATE "+t+" SET ");List<Object> params=new ArrayList<>();boolean f=true;
-            for(Map.Entry<String,Object> e:body.entrySet()){if("id".equals(e.getKey())||"_rowId".equals(e.getKey()))continue;
-                if(!f)sb.append(",");sb.append("`").append(e.getKey()).append("`=?");params.add(e.getValue());f=false;}
+            for(Map.Entry<String,Object> e:body.entrySet()){
+                String k = e.getKey();
+                if("id".equals(k)||"_rowId".equals(k))continue;
+                if(!COL_PATTERN.matcher(k).matches()) continue;
+                if(!f)sb.append(",");
+                sb.append("`").append(k).append("`=?");
+                params.add(e.getValue());
+                f=false;
+            }
             if(params.isEmpty())return Result.error("无更新字段");
             sb.append(" WHERE id=?");params.add(id);int n=db.update(sb.toString(),params.toArray());
             audit.log(String.valueOf(req.getAttribute("user")),table,"修改","id="+id,audit.getIp(req));
