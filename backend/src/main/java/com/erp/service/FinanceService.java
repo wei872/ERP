@@ -86,7 +86,7 @@ public class FinanceService {
         return r;
     }
 
-    private void updateBalance(String code, String name, BigDecimal debit, BigDecimal credit) {
+    public void updateBalance(String code, String name, BigDecimal debit, BigDecimal credit) {
         try {
             boolean isCredit = CREDIT_SUBJECTS.contains(code);
             String period = new SimpleDateFormat("yyyy-MM").format(new Date());

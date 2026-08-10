@@ -48,6 +48,8 @@ export const bizApi = {
   mrpRollupCost: (productCode: string) => request<{ cost: number }>(`/biz/mrp-rollup-cost?product_code=${encodeURIComponent(productCode)}`),
   stockIn: (body: Record<string, unknown>) => request('/biz/stock-in', { method: 'POST', body: JSON.stringify(body) }),
   stockOut: (body: Record<string, unknown>) => request('/biz/stock-out', { method: 'POST', body: JSON.stringify(body) }),
+  stockInFromPurchase: (id: number) => request(`/biz/stock-in-from-purchase/${id}`, { method: 'POST' }),
+  stockOutFromSale: (id: number) => request(`/biz/stock-out-from-sale/${id}`, { method: 'POST' }),
   createVoucher: (lines: any[], voucherWord = '记', period?: string) => request('/biz/voucher', { method: 'POST', body: JSON.stringify({ lines, voucher_word: voucherWord, period }) }),
   voucherFromSale: (id: number) => request(`/biz/finance/voucher-from-sale/${id}`, { method: 'POST' }),
   voucherFromPurchase: (id: number) => request(`/biz/finance/voucher-from-purchase/${id}`, { method: 'POST' }),

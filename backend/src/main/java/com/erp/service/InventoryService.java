@@ -6,11 +6,17 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class InventoryService {
 
     @Autowired private JdbcTemplate db;
+    @Autowired private FinanceService finance;
 
     /** 入库 — 加权平均成本计算 */
     @Transactional
@@ -71,5 +77,110 @@ public class InventoryService {
 
         db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,change_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'出库',?,?,?,CURDATE())",
             "LOG-" + System.currentTimeMillis(), productCode, curName, warehouse, outQty, "OUT-" + System.currentTimeMillis(), "系统");
+    }
+
+    /** 采购单 -> 一键生成入库单 + 自动增加库存 + 同步采购单与物料到货状态 */
+    @Transactional
+    public Map<String,Object> stockInFromPurchase(Long purchaseId, String operator) {
+        Map<String,Object> po = db.queryForMap("SELECT * FROM trade_purchase_main WHERE id=?", purchaseId);
+        String purchaseNo = String.valueOf(po.get("purchase_no"));
+        String status = String.valueOf(po.getOrDefault("purchase_status", ""));
+        if ("已入库".equals(status)) throw new RuntimeException("该采购单已入库: " + purchaseNo);
+
+        String warehouse = String.valueOf(po.getOrDefault("warehouse", "默认仓"));
+        List<Map<String,Object>> details = db.queryForList("SELECT * FROM trade_purchase_detail WHERE purchase_no=?", purchaseNo);
+
+        String inNo = "IN-PO-" + System.currentTimeMillis();
+        BigDecimal totalAmt = new BigDecimal(po.getOrDefault("total_amount", "0").toString());
+        db.update("INSERT INTO trade_stock_in_main(in_no,ref_purchase_no,supplier_code,supplier_name,warehouse,in_date,total_amount,status,handler) VALUES(?,?,?,?,?,CURDATE(),?,'已入库',?)",
+            inNo, purchaseNo, po.getOrDefault("supplier_code",""), po.getOrDefault("supplier_name",""), warehouse, totalAmt, operator == null ? "系统" : operator);
+
+        if (!details.isEmpty()) {
+            for (Map<String,Object> d : details) {
+                String pCode = String.valueOf(d.get("product_code"));
+                String pName = String.valueOf(d.getOrDefault("product_name", pCode));
+                String spec = String.valueOf(d.getOrDefault("spec_model", ""));
+                BigDecimal qty = new BigDecimal(d.getOrDefault("qty", "1").toString());
+                BigDecimal price = new BigDecimal(d.getOrDefault("unit_price", "0").toString());
+                db.update("INSERT INTO trade_stock_in_detail(in_no,product_code,product_name,spec_model,qty,unit_cost,total_amount) VALUES(?,?,?,?,?,?,?)",
+                    inNo, pCode, pName, spec, qty, price, qty.multiply(price));
+                stockIn(pCode, pName, spec, warehouse, "", qty, price);
+                db.update("UPDATE trade_goods_main SET unit_cost=?, purchase_price=? WHERE product_code=?", price, price, pCode);
+            }
+        } else {
+            // 无明细时作为整单操作
+            stockIn(purchaseNo, "采购到货-" + purchaseNo, "", warehouse, "", BigDecimal.ONE, totalAmt);
+        }
+
+        db.update("UPDATE trade_purchase_main SET purchase_status='已入库', arrival_status='全部到货' WHERE id=?", purchaseId);
+
+        Map<String,Object> res = new HashMap<>();
+        res.put("in_no", inNo);
+        res.put("purchase_no", purchaseNo);
+        res.put("status", "已入库");
+        return res;
+    }
+
+    /** 销售单 -> 一键生成出库单 + 自动扣减库存 + 自动结转销售成本凭证(6401/1405) + 同步发货状态 */
+    @Transactional
+    public Map<String,Object> stockOutFromSale(Long saleId, String operator) {
+        Map<String,Object> sale = db.queryForMap("SELECT * FROM trade_sales_main WHERE id=?", saleId);
+        String salesNo = String.valueOf(sale.get("sales_no"));
+        String shipStatus = String.valueOf(sale.getOrDefault("shipping_status", ""));
+        if ("已出库".equals(shipStatus) || "已发货".equals(shipStatus)) throw new RuntimeException("该销售单已完成出库发货: " + salesNo);
+
+        String warehouse = String.valueOf(sale.getOrDefault("warehouse", "默认仓"));
+        List<Map<String,Object>> details = db.queryForList("SELECT * FROM trade_sales_detail WHERE sales_no=?", salesNo);
+
+        String outNo = "OUT-SO-" + System.currentTimeMillis();
+        BigDecimal totalSalesAmt = new BigDecimal(sale.getOrDefault("total_amount", "0").toString());
+        db.update("INSERT INTO trade_stock_out_main(out_no,ref_sales_no,customer_code,customer_name,warehouse,out_date,total_amount,status,handler) VALUES(?,?,?,?,?,CURDATE(),?,'已出库',?)",
+            outNo, salesNo, sale.getOrDefault("customer_code",""), sale.getOrDefault("customer_name",""), warehouse, totalSalesAmt, operator == null ? "系统" : operator);
+
+        BigDecimal cogsTotal = BigDecimal.ZERO;
+        if (!details.isEmpty()) {
+            for (Map<String,Object> d : details) {
+                String pCode = String.valueOf(d.get("product_code"));
+                String pName = String.valueOf(d.getOrDefault("product_name", pCode));
+                String spec = String.valueOf(d.getOrDefault("spec_model", ""));
+                BigDecimal qty = new BigDecimal(d.getOrDefault("qty", "1").toString());
+                stockOut(pCode, warehouse, qty);
+                // 获取商品当前库存成本单价
+                BigDecimal unitCost = BigDecimal.ZERO;
+                List<Map<String,Object>> balRows = db.queryForList("SELECT unit_cost FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", pCode, warehouse);
+                if (!balRows.isEmpty() && balRows.get(0).get("unit_cost") != null) {
+                    unitCost = new BigDecimal(balRows.get(0).get("unit_cost").toString());
+                }
+                BigDecimal lineCost = qty.multiply(unitCost).setScale(2, RoundingMode.HALF_UP);
+                cogsTotal = cogsTotal.add(lineCost);
+                db.update("INSERT INTO trade_stock_out_detail(out_no,product_code,product_name,spec_model,qty,unit_cost,total_amount) VALUES(?,?,?,?,?,?,?)",
+                    outNo, pCode, pName, spec, qty, unitCost, lineCost);
+            }
+        }
+
+        db.update("UPDATE trade_sales_main SET shipping_status='已出库', sales_status='已完成' WHERE id=?", saleId);
+
+        // 自动结转销售成本会计凭证 (借: 6401 主营业务成本, 贷: 1405 库存商品)
+        String cogsVoucherNo = "";
+        if (cogsTotal.signum() > 0) {
+            cogsVoucherNo = "VZ-COGS-" + System.currentTimeMillis();
+            String period = new SimpleDateFormat("yyyy-MM").format(new Date());
+            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
+                cogsVoucherNo, period, cogsTotal, cogsTotal, "销售出库自动结转成本:" + salesNo);
+            db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'6401','主营业务成本',?,0,?)",
+                cogsVoucherNo, cogsTotal, "结转销售成本-" + salesNo);
+            db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1405','库存商品',0,?,?)",
+                cogsVoucherNo, cogsTotal, "结转销售成本-" + salesNo);
+            finance.updateBalance("6401", "主营业务成本", cogsTotal, BigDecimal.ZERO);
+            finance.updateBalance("1405", "库存商品", BigDecimal.ZERO, cogsTotal);
+        }
+
+        Map<String,Object> res = new HashMap<>();
+        res.put("out_no", outNo);
+        res.put("sales_no", salesNo);
+        res.put("cogs_amount", cogsTotal);
+        res.put("cogs_voucher_no", cogsVoucherNo);
+        res.put("status", "已出库");
+        return res;
     }
 }

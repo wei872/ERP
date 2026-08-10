@@ -201,6 +201,25 @@ public class BizController {
         } catch (Exception e) { return Result.error("出库失败: " + e.getMessage()); }
     }
 
+    // ── 采购单 / 销售单 智能单据联动 ──
+    @PostMapping("/stock-in-from-purchase/{id}") public Result stockInFromPurchase(@PathVariable Long id, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"procurement".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
+        try {
+            Map<String,Object> r = inventory.stockInFromPurchase(id, user(req));
+            audit.log(user(req), "采购", "采购一键入库", "purchaseId="+id, audit.getIp(req));
+            return Result.ok(r);
+        } catch (Exception e) { return Result.error("采购入库联动失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/stock-out-from-sale/{id}") public Result stockOutFromSale(@PathVariable Long id, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
+        try {
+            Map<String,Object> r = inventory.stockOutFromSale(id, user(req));
+            audit.log(user(req), "销售", "销售一键出库", "saleId="+id, audit.getIp(req));
+            return Result.ok(r);
+        } catch (Exception e) { return Result.error("销售出库联动失败: " + e.getMessage()); }
+    }
+
     // ── 凭证 ──
     @PostMapping("/voucher") public Result createVoucher(@RequestBody Map<String,Object> body, HttpServletRequest req) {
         if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");

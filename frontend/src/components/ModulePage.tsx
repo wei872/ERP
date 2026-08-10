@@ -87,6 +87,34 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     setLoading(false); closeModal();
   }, [table, modalMode, activeRow, formData, tableKey, currentPage, search, fetchData, toastFn, closeModal]);
 
+  const handleStockInLink = useCallback(async (row: Record<string, unknown>) => {
+    const id = Number((row as any).id);
+    if (!id) return;
+    setLoading(true);
+    try {
+      await bizApi.stockInFromPurchase(id);
+      toastFn('✅ 采购单入库成功，库存与到货状态已联动更新！');
+      fetchData(currentPage, search);
+    } catch (e: any) {
+      toastFn('❌ 入库失败: ' + (e.message || '系统错误'));
+    }
+    setLoading(false);
+  }, [currentPage, search, fetchData, toastFn]);
+
+  const handleStockOutLink = useCallback(async (row: Record<string, unknown>) => {
+    const id = Number((row as any).id);
+    if (!id) return;
+    setLoading(true);
+    try {
+      await bizApi.stockOutFromSale(id);
+      toastFn('✅ 销售单出库成功，库存已扣减并自动结转成本凭证！');
+      fetchData(currentPage, search);
+    } catch (e: any) {
+      toastFn('❌ 出库失败: ' + (e.message || '系统错误'));
+    }
+    setLoading(false);
+  }, [currentPage, search, fetchData, toastFn]);
+
   const handleDelete = useCallback(async () => {
     if (!activeRow) return; setLoading(true);
     try { const ri = (activeRow as any).id; await dataApi.delete(tableKey, Number(ri)); fetchData(currentPage, search); toastFn('删除成功'); }
@@ -145,6 +173,8 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
               </td>; })}
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
                 <div className="flex items-center justify-center gap-1.5">
+                  {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
+                  {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
                   <button onClick={() => openModal('view', row)} className="px-2.5 py-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors font-medium">查看</button>
                   {canEdit && <button onClick={() => openModal('edit', row)} className="px-2.5 py-1 text-[11px] text-amber-600 bg-amber-50 hover:bg-amber-100 rounded-md transition-colors font-medium">编辑</button>}
                   {canDelete && <button onClick={() => openModal('delete', row)} className="px-2.5 py-1 text-[11px] text-red-600 bg-red-50 hover:bg-red-100 rounded-md transition-colors font-medium">删除</button>}
