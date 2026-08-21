@@ -239,9 +239,165 @@ public class DataController {
             }
             sb.append(" WHERE id=?");params.add(id);int n=db.update(sb.toString(),params.toArray());
             audit.log(String.valueOf(req.getAttribute("user")),table,"修改","id="+id,audit.getIp(req));
+
+            // 级联更正业务模块关联数据与凭证/应收应付总账/工单/领料/商品库
+            if (t.equals("trade_sales_main")) handleUpdateSalesMain(id, body);
+            if (t.equals("trade_sales_detail")) handleUpdateSalesDetail(id, body);
+            if (t.equals("trade_purchase_main")) handleUpdatePurchaseMain(id, body);
+            if (t.equals("trade_purchase_detail")) handleUpdatePurchaseDetail(id, body);
+            if (t.equals("finance_receivable_main")) handleUpdateReceivableMain(id, body);
+            if (t.equals("finance_payable_main")) handleUpdatePayableMain(id, body);
+            if (t.equals("prod_work_order")) handleUpdateWorkOrder(id, body);
+            if (t.equals("prod_material_requisition")) handleUpdateRequisition(id, body);
+            if (t.equals("trade_goods_main")) handleUpdateGoodsMain(id, body);
+
             return n>0?Result.ok("修改成功"):Result.error("记录不存在");
         }catch(IllegalArgumentException e){return Result.error(e.getMessage());}
         catch(Exception e){return Result.error("修改失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
+    }
+
+    private void handleUpdateSalesDetail(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> d = db.queryForMap("SELECT sales_no, qty, unit_price FROM trade_sales_detail WHERE id=?", id);
+            String salesNo = String.valueOf(d.get("sales_no"));
+            if (d.get("qty") != null && d.get("unit_price") != null) {
+                java.math.BigDecimal qty = new java.math.BigDecimal(d.get("qty").toString());
+                java.math.BigDecimal price = new java.math.BigDecimal(d.get("unit_price").toString());
+                java.math.BigDecimal amt = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
+                db.update("UPDATE trade_sales_detail SET amount=? WHERE id=?", amt, id);
+
+                // 重新汇总销售主表总金额
+                java.math.BigDecimal newTotal = db.queryForObject("SELECT COALESCE(SUM(amount),0) FROM trade_sales_detail WHERE sales_no=?", java.math.BigDecimal.class, salesNo);
+                if (newTotal != null && newTotal.signum() > 0) {
+                    db.update("UPDATE trade_sales_main SET total_amount=? WHERE sales_no=?", newTotal, salesNo);
+                    db.update("UPDATE finance_receivable_main SET total_amount=?, remain_amount=GREATEST(0, total_amount-COALESCE(received_amount,0)) WHERE remark LIKE ?", newTotal, "%" + salesNo + "%");
+                    db.update("UPDATE voucher_main SET debit_total=?, credit_total=? WHERE remark LIKE ?", newTotal, newTotal, "%" + salesNo + "%");
+                    db.update("UPDATE voucher_detail SET debit_amount=? WHERE summary LIKE ? AND subject_code='1122'", newTotal, "%" + salesNo + "%");
+                    db.update("UPDATE voucher_detail SET credit_amount=? WHERE summary LIKE ? AND subject_code='6001'", newTotal, "%" + salesNo + "%");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Cascade update sales detail warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdatePurchaseDetail(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> d = db.queryForMap("SELECT purchase_no, qty, unit_price FROM trade_purchase_detail WHERE id=?", id);
+            String purchaseNo = String.valueOf(d.get("purchase_no"));
+            if (d.get("qty") != null && d.get("unit_price") != null) {
+                java.math.BigDecimal qty = new java.math.BigDecimal(d.get("qty").toString());
+                java.math.BigDecimal price = new java.math.BigDecimal(d.get("unit_price").toString());
+                java.math.BigDecimal amt = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
+                db.update("UPDATE trade_purchase_detail SET amount=? WHERE id=?", amt, id);
+
+                // 重新汇总采购主表总金额
+                java.math.BigDecimal newTotal = db.queryForObject("SELECT COALESCE(SUM(amount),0) FROM trade_purchase_detail WHERE purchase_no=?", java.math.BigDecimal.class, purchaseNo);
+                if (newTotal != null && newTotal.signum() > 0) {
+                    db.update("UPDATE trade_purchase_main SET total_amount=? WHERE purchase_no=?", newTotal, purchaseNo);
+                    db.update("UPDATE finance_payable_main SET total_amount=?, remain_amount=GREATEST(0, total_amount-COALESCE(paid_amount,0)) WHERE remark LIKE ?", newTotal, "%" + purchaseNo + "%");
+                    db.update("UPDATE voucher_main SET debit_total=?, credit_total=? WHERE remark LIKE ?", newTotal, newTotal, "%" + purchaseNo + "%");
+                    db.update("UPDATE voucher_detail SET debit_amount=? WHERE summary LIKE ? AND subject_code='1403'", newTotal, "%" + purchaseNo + "%");
+                    db.update("UPDATE voucher_detail SET credit_amount=? WHERE summary LIKE ? AND subject_code='2202'", newTotal, "%" + purchaseNo + "%");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Cascade update purchase detail warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdateWorkOrder(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> wo = db.queryForMap("SELECT work_order_no, product_code, product_name, plan_qty, spec_model FROM prod_work_order WHERE id=?", id);
+            String woNo = String.valueOf(wo.get("work_order_no"));
+            String pCode = String.valueOf(wo.get("product_code"));
+            String pName = String.valueOf(wo.get("product_name"));
+            String spec = String.valueOf(wo.getOrDefault("spec_model", ""));
+
+            // 联动更新关联领料单
+            db.update("UPDATE prod_material_requisition SET product_code=?, product_name=?, spec_model=? WHERE ref_work_order=?",
+                pCode, pName, spec, woNo);
+            db.update("UPDATE prod_warehousing SET product_code=?, product_name=?, spec_model=? WHERE ref_work_order=?",
+                pCode, pName, spec, woNo);
+            db.update("UPDATE prod_cost_settle SET product_code=?, product_name=?, spec_model=? WHERE work_order_no=?",
+                pCode, pName, spec, woNo);
+        } catch (Exception e) {
+            System.err.println("Cascade update work order warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdateRequisition(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> req = db.queryForMap("SELECT req_no, product_code, plan_req_qty, actual_req_qty FROM prod_material_requisition WHERE id=?", id);
+            String pCode = String.valueOf(req.get("product_code"));
+            if (req.get("actual_req_qty") != null) {
+                java.math.BigDecimal actualQty = new java.math.BigDecimal(req.get("actual_req_qty").toString());
+                db.update("UPDATE trade_inventory_balance SET qty=GREATEST(0, qty-?) WHERE product_code=?", actualQty, pCode);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void handleUpdateGoodsMain(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> g = db.queryForMap("SELECT product_code, product_name, unit_cost FROM trade_goods_main WHERE id=?", id);
+            String pCode = String.valueOf(g.get("product_code"));
+            String pName = String.valueOf(g.get("product_name"));
+            if (g.get("unit_cost") != null) {
+                java.math.BigDecimal unitCost = new java.math.BigDecimal(g.get("unit_cost").toString());
+                db.update("UPDATE trade_inventory_balance SET product_name=?, unit_cost=?, total_value=qty*? WHERE product_code=?",
+                    pName, unitCost, unitCost, pCode);
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void handleUpdateSalesMain(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> sale = db.queryForMap("SELECT sales_no, total_amount, customer_code, customer_name FROM trade_sales_main WHERE id=?", id);
+            String salesNo = String.valueOf(sale.get("sales_no"));
+            if (sale.get("total_amount") != null) {
+                java.math.BigDecimal amt = new java.math.BigDecimal(sale.get("total_amount").toString());
+                String custCode = String.valueOf(sale.getOrDefault("customer_code", ""));
+                String custName = String.valueOf(sale.getOrDefault("customer_name", ""));
+                db.update("UPDATE finance_receivable_main SET customer_code=?, customer_name=?, total_amount=?, remain_amount=GREATEST(0, total_amount-COALESCE(received_amount,0)) WHERE remark LIKE ?",
+                    custCode, custName, amt, "%" + salesNo + "%");
+                db.update("UPDATE voucher_main SET debit_total=?, credit_total=? WHERE remark LIKE ?", amt, amt, "%" + salesNo + "%");
+                db.update("UPDATE voucher_detail SET debit_amount=? WHERE summary LIKE ? AND subject_code='1122'", amt, "%" + salesNo + "%");
+                db.update("UPDATE voucher_detail SET credit_amount=? WHERE summary LIKE ? AND subject_code='6001'", amt, "%" + salesNo + "%");
+            }
+        } catch (Exception e) {
+            System.err.println("Cascade update sales main warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdatePurchaseMain(Long id, Map<String,Object> body) {
+        try {
+            Map<String,Object> po = db.queryForMap("SELECT purchase_no, total_amount, supplier_code, supplier_name FROM trade_purchase_main WHERE id=?", id);
+            String purchaseNo = String.valueOf(po.get("purchase_no"));
+            if (po.get("total_amount") != null) {
+                java.math.BigDecimal amt = new java.math.BigDecimal(po.get("total_amount").toString());
+                String suppCode = String.valueOf(po.getOrDefault("supplier_code", ""));
+                String suppName = String.valueOf(po.getOrDefault("supplier_name", ""));
+                db.update("UPDATE finance_payable_main SET supplier_code=?, supplier_name=?, total_amount=?, remain_amount=GREATEST(0, total_amount-COALESCE(paid_amount,0)) WHERE remark LIKE ?",
+                    suppCode, suppName, amt, "%" + purchaseNo + "%");
+                db.update("UPDATE voucher_main SET debit_total=?, credit_total=? WHERE remark LIKE ?", amt, amt, "%" + purchaseNo + "%");
+                db.update("UPDATE voucher_detail SET debit_amount=? WHERE summary LIKE ? AND subject_code='1403'", amt, "%" + purchaseNo + "%");
+                db.update("UPDATE voucher_detail SET credit_amount=? WHERE summary LIKE ? AND subject_code='2202'", amt, "%" + purchaseNo + "%");
+            }
+        } catch (Exception e) {
+            System.err.println("Cascade update purchase main warning: " + e.getMessage());
+        }
+    }
+
+    private void handleUpdateReceivableMain(Long id, Map<String,Object> body) {
+        try {
+            db.update("UPDATE finance_receivable_main SET remain_amount=GREATEST(0, total_amount-COALESCE(received_amount,0)) WHERE id=?", id);
+        } catch (Exception ignored) {}
+    }
+
+    private void handleUpdatePayableMain(Long id, Map<String,Object> body) {
+        try {
+            db.update("UPDATE finance_payable_main SET remain_amount=GREATEST(0, total_amount-COALESCE(paid_amount,0)) WHERE id=?", id);
+        } catch (Exception ignored) {}
     }
 
     @Transactional
