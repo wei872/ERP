@@ -1361,6 +1361,12 @@ public class ExportService {
         COL_CN_MAP.put("update_time", "更新时间");
     }
 
+    /** 表中文名（供 MetaService 复用，未命中返回原表名） */
+    public static String tableCn(String table) { return TABLE_CN_MAP.getOrDefault(table, table); }
+
+    /** 列中文名（全局列名映射，未命中返回原列名） */
+    public static String colCn(String col) { return COL_CN_MAP.getOrDefault(col, col); }
+
     /** 导出表数据为纯中文 CSV（支持全量中文列名与 UTF-8 BOM） */
     public byte[] exportToCsv(String tableName) {
         // 🔒 SQL 注入防护

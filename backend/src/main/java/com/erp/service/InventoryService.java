@@ -18,9 +18,65 @@ public class InventoryService {
     @Autowired private JdbcTemplate db;
     @Autowired private FinanceService finance;
 
-    /** 入库 — 加权平均成本计算 */
+    /** ===== 库存唯一写入口：单据级应用 =====
+     *  入库/出库主表 INSERT 后调用，按单号应用全部明细行。*/
+    @Transactional
+    public void applyStockInDoc(String inNo, String warehouse, String refNo) {
+        List<Map<String,Object>> details = db.queryForList("SELECT * FROM trade_stock_in_detail WHERE in_no=?", inNo);
+        for (Map<String,Object> d : details) {
+            stockIn(String.valueOf(d.get("product_code")), String.valueOf(d.getOrDefault("product_name", "")),
+                String.valueOf(d.getOrDefault("spec_model", "")), warehouse,
+                String.valueOf(d.getOrDefault("location", "")),
+                new BigDecimal(d.getOrDefault("qty", 0).toString()),
+                new BigDecimal(d.getOrDefault("unit_cost", 0).toString()), refNo);
+        }
+    }
+
+    @Transactional
+    public void applyStockOutDoc(String outNo, String warehouse, String refNo) {
+        List<Map<String,Object>> details = db.queryForList("SELECT * FROM trade_stock_out_detail WHERE out_no=?", outNo);
+        for (Map<String,Object> d : details) {
+            stockOut(String.valueOf(d.get("product_code")), warehouse,
+                new BigDecimal(d.getOrDefault("qty", 0).toString()), refNo);
+        }
+    }
+
+    /** 明细行应用（明细 INSERT 后调用；主表必须已存在，否则硬失败整体回滚 —— 不再静默丢数据） */
+    @Transactional
+    public void applyStockInLine(Map<String,Object> line) {
+        Map<String,Object> main = requireMain("trade_stock_in_main", "in_no", line.get("in_no"));
+        stockIn(String.valueOf(line.get("product_code")), String.valueOf(line.getOrDefault("product_name", "")),
+            String.valueOf(line.getOrDefault("spec_model", "")),
+            String.valueOf(main.getOrDefault("warehouse", "默认仓")),
+            String.valueOf(line.getOrDefault("location", "")),
+            new BigDecimal(line.getOrDefault("qty", 0).toString()),
+            new BigDecimal(line.getOrDefault("unit_cost", 0).toString()),
+            String.valueOf(line.get("in_no")));
+    }
+
+    @Transactional
+    public void applyStockOutLine(Map<String,Object> line) {
+        Map<String,Object> main = requireMain("trade_stock_out_main", "out_no", line.get("out_no"));
+        stockOut(String.valueOf(line.get("product_code")),
+            String.valueOf(main.getOrDefault("warehouse", "默认仓")),
+            new BigDecimal(line.getOrDefault("qty", 0).toString()),
+            String.valueOf(line.get("out_no")));
+    }
+
+    private Map<String,Object> requireMain(String mainTable, String noCol, Object no) {
+        List<Map<String,Object>> rows = db.queryForList("SELECT * FROM " + mainTable + " WHERE " + noCol + "=?", no);
+        if (rows.isEmpty()) throw new RuntimeException("库存联动失败: " + mainTable + " 不存在单号 " + no + "，请先创建主表记录");
+        return rows.get(0);
+    }
+
+    /** 入库 — 加权平均成本计算（兼容旧签名） */
     @Transactional
     public void stockIn(String productCode, String productName, String specModel, String warehouse, String location, BigDecimal inQty, BigDecimal inPrice) {
+        stockIn(productCode, productName, specModel, warehouse, location, inQty, inPrice, "手动入库");
+    }
+
+    @Transactional
+    public void stockIn(String productCode, String productName, String specModel, String warehouse, String location, BigDecimal inQty, BigDecimal inPrice, String refNo) {
         if (inQty.compareTo(BigDecimal.ZERO) <= 0) return;
 
         // 查询当前库存（行锁 FOR UPDATE 防并发竞争）
@@ -48,13 +104,19 @@ public class InventoryService {
                 productCode, curName == null ? productCode : curName, curSpec == null ? "" : curSpec, warehouse, location, newQty, newCost, newValue);
         }
 
-        db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,change_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'入库',?,?,?,CURDATE())",
-            "LOG-" + System.currentTimeMillis(), productCode, curName == null ? productCode : curName, warehouse, inQty, "IN-" + System.currentTimeMillis(), "系统");
+        db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,before_qty,change_qty,after_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'入库',?,?,?,?,?,CURDATE())",
+            "LOG-" + System.currentTimeMillis(), productCode, curName == null ? productCode : curName, warehouse,
+            oldQty, inQty, newQty, refNo, "系统");
     }
 
-    /** 出库 — 按比例扣减 */
+    /** 出库 — 按比例扣减（兼容旧签名） */
     @Transactional
     public void stockOut(String productCode, String warehouse, BigDecimal outQty) {
+        stockOut(productCode, warehouse, outQty, "手动出库");
+    }
+
+    @Transactional
+    public void stockOut(String productCode, String warehouse, BigDecimal outQty, String refNo) {
         if (outQty.compareTo(BigDecimal.ZERO) <= 0) return;
 
         // 行锁 FOR UPDATE 防并发超扣
@@ -75,8 +137,9 @@ public class InventoryService {
         db.update("UPDATE trade_inventory_balance SET qty=?, unit_cost=?, total_value=? WHERE product_code=? AND warehouse=?",
             newQty, newCost, newValue, productCode, warehouse);
 
-        db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,change_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'出库',?,?,?,CURDATE())",
-            "LOG-" + System.currentTimeMillis(), productCode, curName, warehouse, outQty, "OUT-" + System.currentTimeMillis(), "系统");
+        db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,before_qty,change_qty,after_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'出库',?,?,?,?,?,CURDATE())",
+            "LOG-" + System.currentTimeMillis(), productCode, curName, warehouse,
+            curQty, outQty, newQty, refNo, "系统");
     }
 
     /** 采购单 -> 一键生成入库单 + 自动增加库存 + 同步采购单与物料到货状态 */
@@ -104,7 +167,7 @@ public class InventoryService {
                 BigDecimal price = new BigDecimal(d.getOrDefault("unit_price", "0").toString());
                 db.update("INSERT INTO trade_stock_in_detail(in_no,product_code,product_name,spec_model,qty,unit_cost,total_amount) VALUES(?,?,?,?,?,?,?)",
                     inNo, pCode, pName, spec, qty, price, qty.multiply(price));
-                stockIn(pCode, pName, spec, warehouse, "", qty, price);
+                stockIn(pCode, pName, spec, warehouse, "", qty, price, purchaseNo);
                 db.update("UPDATE trade_goods_main SET unit_cost=?, purchase_price=? WHERE product_code=?", price, price, pCode);
             }
         } else {
@@ -144,7 +207,7 @@ public class InventoryService {
                 String pName = String.valueOf(d.getOrDefault("product_name", pCode));
                 String spec = String.valueOf(d.getOrDefault("spec_model", ""));
                 BigDecimal qty = new BigDecimal(d.getOrDefault("qty", "1").toString());
-                stockOut(pCode, warehouse, qty);
+                stockOut(pCode, warehouse, qty, salesNo);
                 // 获取商品当前库存成本单价
                 BigDecimal unitCost = BigDecimal.ZERO;
                 List<Map<String,Object>> balRows = db.queryForList("SELECT unit_cost FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", pCode, warehouse);

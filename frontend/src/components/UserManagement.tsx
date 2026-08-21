@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_LABELS, ROLE_COLORS, type Permission } from '../types';
-import { erpTables } from '../data/mockData';
+import { useMeta } from '../meta/store';
 import { finApi } from '../api';
-
-const ALL_GRANTABLE_MODULES = [...new Set(erpTables.map(t => t.sub))].sort();
 
 export default function UserManagement() {
   const { users, currentUser, approveUser, disableUser, enableUser, deleteUser, updateUserPermissions } = useAuth();
+  const { tables } = useMeta();
+  const ALL_GRANTABLE_MODULES = [...new Set(tables.map(t => t.sub))].sort();
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'list' | 'permissions' | 'pending' | 'finperms'>('list');
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);

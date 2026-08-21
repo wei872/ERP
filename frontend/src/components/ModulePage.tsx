@@ -1,10 +1,8 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { erpTables } from '../data/mockData';
 import { useAuth } from '../context/AuthContext';
 import { dataApi } from '../api';
 import { bizApi } from '../api';
-
-function getModuleName(tk: string) { const t = erpTables.find(x => x.key === tk); return t?.sub || t?.module || tk; }
+import { useTableMeta, statusBadgeClass } from '../meta/store';
 
 export default function ModulePage({ tableKey }: { tableKey: string }) {
   const { currentUser } = useAuth();
@@ -23,9 +21,9 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const [previewImg, setPreviewImg] = useState<string | null>(null);
   const pageSize = 15;
 
-  const table = useMemo(() => erpTables.find(t => t.key === tableKey), [tableKey]);
+  const { meta: table, loading: metaLoading } = useTableMeta(tableKey);
   const isAdmin = currentUser?.role === 'admin';
-  const moduleName = getModuleName(tableKey);
+  const moduleName = table?.sub || table?.module || tableKey;
   const perms = (currentUser?.permissions || []) as any[];
   const canAdd = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canAdd === true);
   const canEdit = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canEdit === true);
@@ -48,8 +46,8 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     setLoaded(true); setLoading(false);
   }, [table, tableKey, pageSize]);
 
-  // 首次加载 + tableKey 变化
-  useEffect(() => { setLoaded(false); setSearch(''); setCurrentPage(1); fetchData(1, ''); }, [tableKey]);
+  // 首次加载 + tableKey 变化（列元数据就绪后才拉数据）
+  useEffect(() => { setLoaded(false); setSearch(''); setCurrentPage(1); if (table) fetchData(1, ''); }, [tableKey, table]);
 
   // 翻页触发
   useEffect(() => { if (loaded) fetchData(currentPage, search); }, [currentPage]);
@@ -82,7 +80,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
 
   const openModal = useCallback((mode: 'view' | 'add' | 'edit' | 'delete', row?: Record<string, unknown>) => {
     setModalMode(mode); setActiveRow(row || null);
-    if (mode === 'add') { const init: Record<string, unknown> = {}; table?.cols.forEach(c => { init[c[0]] = c[2] === 'number' ? 0 : c[2] === 'date' ? new Date().toISOString().split('T')[0] : ''; }); setFormData(init); }
+    if (mode === 'add') { const init: Record<string, unknown> = {}; table?.cols.forEach(c => { init[c.name] = c.type === 'number' ? 0 : c.type === 'date' ? new Date().toISOString().split('T')[0] : ''; }); setFormData(init); }
     else if (row) setFormData({ ...row });
     setShowModal(true);
   }, [table]);
@@ -93,11 +91,12 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     const clean: Record<string, unknown> = {}; for (const k of Object.keys(formData)) { if (k !== '_rowId') clean[k] = formData[k]; }
     try {
       if (modalMode === 'edit' && activeRow) {
-        const ri = (activeRow as any).id; await dataApi.update(tableKey, Number(ri), clean);
-        setData(p => p.map(r => String((r as any).id) === String(ri) ? { ...clean, id: ri } : r)); toastFn('修改成功');
+        const ri = (activeRow as any).id; const r = await dataApi.update(tableKey, Number(ri), clean);
+        setData(p => p.map(row => String((row as any).id) === String(ri) ? { ...clean, id: ri } : row)); toastFn('修改成功');
+        if (r.data && r.data.warning) toastFn('⚠️ ' + r.data.warning);
       } else if (modalMode === 'add') {
-        await dataApi.create(tableKey, clean);
-        fetchData(currentPage, search); toastFn('新增成功');
+        const r = await dataApi.create(tableKey, clean);
+        fetchData(currentPage, search); toastFn(r.data && r.data.warning ? '⚠️ ' + r.data.warning : '新增成功');
       }
     } catch (e: any) { toastFn('操作失败：' + e.message); }
     setLoading(false); closeModal();
@@ -161,9 +160,12 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
 
   if (!isAdmin && !perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canView === true))
     return <div className="p-16 text-center erp-fade-in"><div className="text-6xl mb-4">🔒</div><h2 className="text-xl font-bold text-slate-700">权限不足</h2></div>;
+  if (metaLoading || (!table && !loaded)) return <div className="p-16 text-center"><div className="erp-spinner mb-3"></div><p className="text-sm text-slate-400">加载中...</p></div>;
   if (!table) return <div className="p-6 text-slate-500">未找到</div>;
   if (!loaded && !error) return <div className="p-16 text-center"><div className="erp-spinner mb-3"></div><p className="text-sm text-slate-400">加载中...</p></div>;
   if (error) return <div className="p-16 text-center erp-fade-in"><div className="text-5xl mb-4">⚠️</div><p className="text-red-500 font-medium">{error}</p></div>;
+
+  const dicts = table.dicts || {};
 
   return (<div className="p-6 space-y-5 erp-fade-in">
     {toast && <div className="erp-toast">{toast}</div>}
@@ -172,7 +174,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
-          <span>💡</span> 【{table.name} ({tableKey})】数据表说明与智能操作
+          <span>💡</span> 【{table.cnName} ({tableKey})】数据表说明与智能操作
         </h3>
         <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">ERP 底层实体基座</span>
       </div>
@@ -203,10 +205,10 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
         <div className="flex items-center gap-2 text-xs text-slate-400 mb-1.5">
-          <span>{table.module}</span><span className="text-slate-300">/</span><span>{table.sub}</span><span className="text-slate-300">/</span><span className="text-slate-700 font-medium">{table.name}</span>
+          <span>{table.module}</span><span className="text-slate-300">/</span><span>{table.sub}</span><span className="text-slate-300">/</span><span className="text-slate-700 font-medium">{table.cnName}</span>
         </div>
         <div className="flex items-center gap-3">
-          <h3 className="text-xl font-bold text-slate-800 tracking-tight">{table.name}</h3>
+          <h3 className="text-xl font-bold text-slate-800 tracking-tight">{table.cnName}</h3>
           <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md font-mono">{tableKey}</span>
           <span className="text-[11px] text-slate-400">{totalRows} 条 · {table.cols.length} 列</span>
           {isAdmin && <span className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded-md font-medium">管理员</span>}
@@ -229,17 +231,17 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
         <table className="erp-table">
           <thead><tr>
             <th className="w-12">#</th>
-            {table.cols.map(col => <th key={col[0]} className="whitespace-nowrap">{col[1]}</th>)}
+            {table.cols.map(col => <th key={col.name} className="whitespace-nowrap">{col.cnName}</th>)}
             <th className="text-center w-40 sticky right-0 bg-slate-50">操作</th>
           </tr></thead>
           <tbody>
             {data.map((row, idx) => <tr key={(row as any).id || idx}>
               <td className="text-[11px] text-slate-400 font-mono">{(currentPage - 1) * pageSize + idx + 1}</td>
-              {table.cols.map(col => { const v = row[col[0]]; const t = col[2]; const k = col[0]; return <td key={col[0]} className="whitespace-nowrap" >
-                {t === 'image' || k.includes('image') || String(v ?? '').startsWith('data:image/') ? (
+              {table.cols.map(col => { const k = col.name, t = col.type; const v = row[k]; return <td key={k} className="whitespace-nowrap" >
+                {String(v ?? '').startsWith('data:image/') || (t === 'image' && false) ? (
                   v ? <img src={String(v)} alt="发票图片" onClick={() => setPreviewImg(String(v))} className="h-9 w-14 object-cover rounded border border-slate-200 cursor-pointer shadow-sm hover:scale-105 transition-transform" title="点击放大查看图片" /> : <span className="text-slate-300 text-xs italic">无图片</span>
                 ) : t === 'number' ? <span className="font-mono tabular-nums text-slate-700">{typeof v === 'number' ? (v as number).toLocaleString() : String(v ?? '')}</span>
-                : (col[0].includes('status') || col[0].includes('_status')) ? <span className={`erp-badge ${String(v).match(/正常|完成|合格|启用|通过|在线/) ? 'bg-emerald-100 text-emerald-700' : String(v).match(/待|草稿/) ? 'bg-amber-100 text-amber-700' : String(v).match(/取消|停用|报废/) ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'}`}>{String(v ?? '')}</span>
+                : (k.includes('status') || k.includes('_status') || dicts[k]) ? <span className={`erp-badge ${statusBadgeClass(k, v, dicts)}`}>{String(v ?? '')}</span>
                 : <span className="text-slate-600">{String(v ?? '')}</span>}
               </td>; })}
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
@@ -280,8 +282,8 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
             <button onClick={closeModal} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg transition-colors"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
           </div>
           <div className="p-6 overflow-y-auto flex-1">
-            {modalMode === 'delete' ? <div className="text-center py-4"><div className="text-4xl mb-3">⚠️</div><p className="text-slate-600 text-sm mb-4">确定要删除这条记录吗？此操作不可撤销。</p><div className="bg-slate-50 rounded-xl p-4 text-left max-w-md mx-auto border border-slate-100">{table.cols.slice(0, 4).map(c => <div key={c[0]} className="flex justify-between py-1.5 text-xs"><span className="text-slate-500">{c[1]}</span><span className="text-slate-800 font-medium">{String(formData[c[0]] ?? '-')}</span></div>)}</div></div>
-            : <div className="space-y-3">{table.cols.map(c => { const k = c[0], l = c[1], t = c[2]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{t === 'image' || k.includes('image') || String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : t === 'image' || k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预监" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
+            {modalMode === 'delete' ? <div className="text-center py-4"><div className="text-4xl mb-3">⚠️</div><p className="text-slate-600 text-sm mb-4">确定要删除这条记录吗？此操作不可撤销（关联明细将按外键级联删除）。</p><div className="bg-slate-50 rounded-xl p-4 text-left max-w-md mx-auto border border-slate-100">{table.cols.slice(0, 4).map(c => <div key={c.name} className="flex justify-between py-1.5 text-xs"><span className="text-slate-500">{c.cnName}</span><span className="text-slate-800 font-medium">{String(formData[c.name] ?? '-')}</span></div>)}</div></div>
+            : <div className="space-y-3">{table.cols.map(c => { const k = c.name, l = c.cnName, t = c.type; const dict = dicts[k]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预览" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : dict ? <select value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"><option value="">-- 请选择{l} --</option>{dict.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}</select> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
           </div>
           <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/50">
             <button onClick={closeModal} className="erp-btn erp-btn-ghost">取消</button>
@@ -303,7 +305,5 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
         </div>
       </div>
     )}
-</div>);
+  </div>);
 }
-
-

@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { erpTables, getModuleTree } from '../data/mockData';
+import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
 import Login from './Login';
 import Dashboard from './Dashboard';
@@ -40,7 +40,8 @@ export default function Layout() {
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
   const pendingCount = users.filter(u => u.status === 'pending').length;
-  const tree = useMemo(() => getModuleTree(), []);
+  const { tables } = useMeta();
+  const tree = useMemo(() => getModuleTree(), [tables]);
 
   const visibleModules = useMemo(() => {
     if (!currentUser) return [];
@@ -49,13 +50,13 @@ export default function Layout() {
     const viewPerms = perms.filter(p => p.canView === true);
     const allowedMods = new Set<string>();
     for (const p of viewPerms) {
-      const isSub = erpTables.some(t => t.sub === p.module);
-      if (isSub) { const tbl = erpTables.find(t => t.sub === p.module); if (tbl) allowedMods.add(tbl.module); }
+      const isSub = tables.some(t => t.sub === p.module);
+      if (isSub) { const tbl = tables.find(t => t.sub === p.module); if (tbl) allowedMods.add(tbl.module); }
       else allowedMods.add(p.module);
     }
     if (viewPerms.some(p => p.module === 'all')) return Object.keys(tree);
     return Array.from(allowedMods).filter(m => tree[m]);
-  }, [currentUser, tree]);
+  }, [currentUser, tree, tables]);
 
   const toggleMod = (k: string) => { setExpandedMods(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; }); };
   const toggleSub = (mk: string, sk: string) => { setExpandedSubs(prev => { const n = new Set(prev); const id = `${mk}::${sk}`; n.has(id) ? n.delete(id) : n.add(id); return n; }); };
@@ -74,7 +75,7 @@ export default function Layout() {
     if (page.type === 'mrp') return '🧮 MRP 物料需求';
     if (page.type === 'ops') return '🛠️ 库存直调 & 期末结账';
     if (page.type === 'reconciliation') return '💸 应收应付核销';
-    if (page.type === 'table') { const t = erpTables.find(x => x.key === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.name}` : '数据表'; }
+    if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
 
@@ -82,7 +83,7 @@ export default function Layout() {
     <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 transition-all duration-300 flex flex-col shrink-0 overflow-hidden border-r border-slate-700/50`} style={{ boxShadow: '4px 0 24px -8px rgba(0,0,0,0.3)' }}>
       <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10 shrink-0">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white font-bold text-base" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 12px rgba(99,102,241,0.4)' }}>E</div>
-        {sidebarOpen && <div className="min-w-0"><h1 className="text-white font-bold text-sm leading-tight tracking-tight">ERP 管理系统</h1><p className="text-slate-400 text-[10px] mt-0.5">{erpTables.length} 张表 · {Object.keys(tree).length} 个模块</p></div>}
+        {sidebarOpen && <div className="min-w-0"><h1 className="text-white font-bold text-sm leading-tight tracking-tight">ERP 管理系统</h1><p className="text-slate-400 text-[10px] mt-0.5">{tables.length} 张表 · {Object.keys(tree).length} 个模块</p></div>}
       </div>
       <nav className="flex-1 overflow-y-auto py-2 px-2">
         {([['dashboard','控制台','📊'],['report','报表中心','📈'],['finance','财务模版','💰']] as const).map(([type, label, icon]) => (
@@ -106,7 +107,7 @@ export default function Layout() {
           if (visibleSubs.length === 0) return null;
           return (<div key={mod} className="mb-0.5"><button onClick={() => toggleMod(mod)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium transition-all ${isExpanded ? 'text-slate-200 bg-white/5' : 'text-slate-400 hover:bg-white/5'}`}><svg className={`w-3 h-3 shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg><span>{mod}</span></button>
           {isExpanded && visibleSubs.map(sub => { const subId = `${mod}::${sub}`; const subExpanded = expandedSubs.has(subId); return (<div key={sub} className="mt-0.5"><button onClick={() => toggleSub(mod, sub)} className="w-full flex items-center gap-2 pl-7 pr-3 py-1.5 rounded-lg text-[11px] transition-all hover:bg-white/5 text-slate-500 hover:text-slate-300"><svg className={`w-2.5 h-2.5 shrink-0 transition-transform duration-200 ${subExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg><span className="truncate flex-1 text-left">{sub}</span><span className="text-[10px] text-slate-600 bg-slate-700/40 px-1.5 py-0.5 rounded">{subs[sub].length}</span></button>
-          {subExpanded && subs[sub].map((t: typeof erpTables[0]) => (<button key={t.key} onClick={() => setPage({ type: 'table', tableKey: t.key })} className={`w-full text-left pl-11 pr-3 py-1.5 rounded-lg text-[11px] transition-all truncate block ${page.type === 'table' && page.tableKey === t.key ? 'text-indigo-300 bg-indigo-500/10 font-medium' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}>{t.name}</button>))}</div>);})}</div>);})}
+          {subExpanded && subs[sub].map((t) => (<button key={t.table} onClick={() => setPage({ type: 'table', tableKey: t.table })} className={`w-full text-left pl-11 pr-3 py-1.5 rounded-lg text-[11px] transition-all truncate block ${page.type === 'table' && page.tableKey === t.table ? 'text-indigo-300 bg-indigo-500/10 font-medium' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}>{t.cnName}</button>))}</div>);})}</div>);})}
       </nav>
       <button onClick={() => setSidebarOpen(!sidebarOpen)} className="flex items-center justify-center h-11 border-t border-white/10 text-slate-500 hover:text-slate-200 transition-colors shrink-0"><svg className={`w-4 h-4 transition-transform duration-300 ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg></button>
     </aside>

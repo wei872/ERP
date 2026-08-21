@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../context/AuthContext';
 import { bizApi } from '../api';
-import { erpTables } from '../data/mockData';
+import { useMeta } from '../meta/store';
 
 const COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
 const EMPTY: { name: string; value: number }[] = [];
@@ -67,6 +67,7 @@ function GuidanceCard({ steps, linkages }: { steps: string[]; linkages: string[]
 
 export default function Dashboard() {
   const { currentUser, users } = useAuth();
+  const { tables } = useMeta();
   const [data, setData] = useState<any>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   useEffect(() => {
@@ -125,7 +126,7 @@ export default function Dashboard() {
         <div className="absolute -bottom-32 -left-20 w-72 h-72 rounded-full" style={{ background: 'rgba(255,255,255,0.04)' }}></div>
         <div className="relative">
           <h2 className="text-2xl font-bold mb-2 tracking-tight">欢迎回来，{currentUser?.realName} 👋</h2>
-          <p className="text-indigo-100 text-sm">{new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'})} · ERP 企业管理系统 · {erpTables?.length || 0} 张数据表</p>
+          <p className="text-indigo-100 text-sm">{new Date().toLocaleDateString('zh-CN',{year:'numeric',month:'long',day:'numeric',weekday:'long'})} · ERP 企业管理系统 · {tables.length || 0} 张数据表</p>
           <div className="flex gap-4 mt-5">
             <div className="bg-white/15 backdrop-blur-md rounded-xl px-5 py-3 border border-white/10">
               <div className="text-xs text-indigo-100 mb-1">在职用户</div>

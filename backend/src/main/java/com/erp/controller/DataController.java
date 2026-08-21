@@ -8,20 +8,28 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import javax.servlet.http.HttpServletRequest;
 import javax.sql.DataSource;
+import java.math.BigDecimal;
 import java.sql.*;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
+/**
+ * 通用 CRUD —— v2 数据基础重构版。
+ * 写入侧三道防线：
+ *   1) 列白名单：只接受 INFORMATION_SCHEMA 里的真实列（MetaService），杜绝任意列名拼接；
+ *   2) 类型转换：按列 JDBC 类型把前端值规范化（空串→null、数字串→BigDecimal/Long），错误就地报人话；
+ *   3) 字典校验：sys_dict_column 绑定的状态列，取值必须命中 sys_dict_item。
+ * 联动钩子：库存联动硬失败（异常上抛、整体回滚）；凭证生成软失败（记日志、结果带 warning）。
+ */
 @RestController
 @RequestMapping("/data")
 public class DataController {
 
     @Autowired private JdbcTemplate db; @Autowired private DataSource ds;
     @Autowired private AuditService audit; @Autowired private FinanceService finance; @Autowired private InventoryService inventory;
+    @Autowired private MetaService meta;
+
     private static final Pattern VALID = Pattern.compile("^[a-z][a-z0-9_]{2,60}$");
-    private static final Pattern COL_PATTERN = Pattern.compile("^[a-zA-Z0-9_]{1,64}$");
-    private static final Map<String, List<String>> TEXT_COLS_CACHE = new ConcurrentHashMap<>();
     private static final Map<String, Set<String>> TABLE_ROLE_MAP = new LinkedHashMap<>();
     static {
         TABLE_ROLE_MAP.put("trade_", new HashSet<>(Arrays.asList("admin","sales","warehouse","procurement")));
@@ -41,23 +49,13 @@ public class DataController {
         TABLE_ROLE_MAP.put("fin_", new HashSet<>(Arrays.asList("admin","accounting")));
     }
 
+    /** 文本列（搜索用），来自元数据缓存 */
     private List<String> getTextColumns(String t) {
-        return TEXT_COLS_CACHE.computeIfAbsent(t, tbl -> {
-            List<String> cols = new ArrayList<>();
-            try (Connection c = ds.getConnection()) {
-                ResultSet rs = c.getMetaData().getColumns(null, null, tbl, null);
-                while (rs.next()) {
-                    String typeName = rs.getString("TYPE_NAME");
-                    if (typeName != null && typeName.toUpperCase().matches(".*(CHAR|TEXT).*")) {
-                        String col = rs.getString("COLUMN_NAME");
-                        if (COL_PATTERN.matcher(col).matches()) {
-                            cols.add(col);
-                        }
-                    }
-                }
-            } catch (Exception ignored) {}
-            return cols;
-        });
+        List<String> cols = new ArrayList<>();
+        for (Map<String,Object> c : meta.columns(t)) {
+            if ("string".equals(c.get("uiType"))) cols.add(String.valueOf(c.get("name")));
+        }
+        return cols;
     }
 
     private boolean canRead(String role, String table) {
@@ -65,12 +63,10 @@ public class DataController {
         for (Map.Entry<String, java.util.Set<String>> e : TABLE_ROLE_MAP.entrySet()) {
             if (table.startsWith(e.getKey())) return e.getValue().contains(role);
         }
-        // 未登记前缀的表一律拒绝，避免越权读取
         return false;
     }
 
-    /** 🔐 后端权限校验 — admin 全可写；副账号只能写本角色前缀下的表，跨模块写一律拒绝。
-     *  细粒度 canAdd/canEdit/canDelete 仍由前端按 sys_user.permissions 控制；此处仅做模块级安全边界。*/
+    /** 🔐 admin 全可写；副账号只能写本角色前缀下的表，跨模块写一律拒绝。 */
     private boolean canWrite(String role, String table) {
         if ("admin".equals(role)) return true;
         for (Map.Entry<String, java.util.Set<String>> e : TABLE_ROLE_MAP.entrySet()) {
@@ -81,9 +77,44 @@ public class DataController {
 
     private String safe(String t) {
         if (!VALID.matcher(t).matches()) throw new IllegalArgumentException("无效表名: "+t);
-        try { db.queryForObject("SELECT COUNT(*) FROM "+t, Integer.class); return t; }
-        catch (Exception e) { throw new IllegalArgumentException("表不存在: "+t); }
+        if (!meta.tableExists(t)) throw new IllegalArgumentException("表不存在: "+t);
+        return t;
     }
+
+    /** 列白名单过滤 + 按列类型规范化值 */
+    private Map<String,Object> sanitize(String table, Map<String,Object> body) {
+        Map<String,Object> typed = new LinkedHashMap<>();
+        Map<String,Map<String,Object>> colMap = new HashMap<>();
+        for (Map<String,Object> c : meta.columns(table)) colMap.put(String.valueOf(c.get("name")), c);
+        for (Map.Entry<String,Object> e : body.entrySet()) {
+            String k = e.getKey();
+            if ("id".equals(k) || "_rowId".equals(k)) continue;
+            Map<String,Object> col = colMap.get(k);
+            if (col == null) continue; // 非真实列，直接丢弃
+            typed.put(k, coerce(k, String.valueOf(col.get("jdbcType")), e.getValue()));
+        }
+        return typed;
+    }
+
+    private Object coerce(String col, String jdbcType, Object v) {
+        if (v == null) return null;
+        String s = String.valueOf(v);
+        switch (String.valueOf(jdbcType)) {
+            case "decimal": case "double": case "float":
+                if (s.trim().isEmpty()) return null;
+                try { return new BigDecimal(s.trim()); }
+                catch (NumberFormatException e) { throw new IllegalArgumentException("字段 " + col + " 需要数字，收到: \"" + s + "\""); }
+            case "int": case "bigint": case "smallint": case "tinyint":
+                if (s.trim().isEmpty()) return null;
+                try { return Long.parseLong(s.trim().replaceFirst("\\.0+$", "")); }
+                catch (NumberFormatException e) { throw new IllegalArgumentException("字段 " + col + " 需要整数，收到: \"" + s + "\""); }
+            case "date": case "datetime": case "timestamp":
+                return s.trim().isEmpty() ? null : s.trim();
+            default:
+                return s.isEmpty() ? null : s; // 空字符串转 null，防止 NOT NULL/DATE 报晦涩错误
+        }
+    }
+
     private int clamp(int v, int mn, int mx) { return Math.max(mn, Math.min(v, mx)); }
     private Map<String,Object> map(Object... entries) {
         Map<String,Object> data = new LinkedHashMap<>();
@@ -94,11 +125,10 @@ public class DataController {
     @GetMapping("/init-db")
     public Result init(HttpServletRequest req) {
         if (!"admin".equals(String.valueOf(req.getAttribute("role")))) return Result.error("权限不足");
-        try (Connection c = ds.getConnection()) {
-            DatabaseMetaData m = c.getMetaData(); ResultSet rs = m.getTables(null,null,"%",new String[]{"TABLE"});
-            int n=0; List<String> names=new ArrayList<>();
-            while(rs.next()){n++;names.add(rs.getString("TABLE_NAME"));}
-            return Result.ok(map("success",true,"tableCount",n,"tables",names));
+        try {
+            List<Map<String,Object>> tables = meta.listTables();
+            meta.evict(null); // 元数据缓存刷新
+            return Result.ok(map("success",true,"tableCount",tables.size(),"registered",tables.size()));
         } catch (Exception e) { return Result.error("DB: "+e.getMessage()); }
     }
 
@@ -130,10 +160,8 @@ public class DataController {
             List<Map<String,Object>> rows=db.queryForList("SELECT * FROM "+t+where+" LIMIT ? OFFSET ?",params.toArray());
             return Result.ok(map("total",total,"page",page,"rows",rows));
         } catch (IllegalArgumentException e) {
-            // safe() 抛出：表名不合法或表不存在
             return Result.error(e.getMessage());
         } catch (Exception e) {
-            // 其余 SQL 异常也返回错误，避免把"出错"伪装成"空表"
             return Result.error("查询失败: " + e.getMessage());
         }
     }
@@ -146,60 +174,74 @@ public class DataController {
         try {
             String t=safe(table);
             if(body.isEmpty())return Result.error("数据为空");
+            meta.validateDictValues(t, body);
+            Map<String,Object> clean = sanitize(t, body);
+            if(clean.isEmpty())return Result.error("无可插入字段（提交字段均不是表的真实列）");
             StringBuilder sb=new StringBuilder("INSERT INTO "+t+" ("),vb=new StringBuilder(" VALUES (");
             List<Object> params=new ArrayList<>();boolean first=true;
-            for(Map.Entry<String,Object> e:body.entrySet()){
-                String k = e.getKey();
-                if("id".equals(k)||"_rowId".equals(k))continue;
-                if(!COL_PATTERN.matcher(k).matches()) continue;
+            for(Map.Entry<String,Object> e:clean.entrySet()){
                 if(!first){sb.append(",");vb.append(",");}
-                sb.append("`").append(k).append("`");
+                sb.append("`").append(e.getKey()).append("`");
                 vb.append("?");
-                Object val = e.getValue();
-                if ("".equals(val)) val = null; // 空字符串转 null，防止 MySQL DATE/DECIMAL 类型匹配报错
-                params.add(val);
+                params.add(e.getValue());
                 first=false;
             }
-            if(params.isEmpty())return Result.error("无可插入字段");
-            sb.append(")").append(vb).append(")");db.update(sb.toString(),params.toArray());
+            sb.append(")").append(vb.append(")"));
+            db.update(sb.toString(),params.toArray());
             Long newId=db.queryForObject("SELECT LAST_INSERT_ID()",Long.class);
             audit.log(String.valueOf(req.getAttribute("user")),table,"新增","id="+newId,audit.getIp(req));
-            try {
-                if(t.equals("trade_stock_in_main")) handleStockIn(body);
-                if(t.equals("trade_stock_out_main")) handleStockOut(body);
-                if(t.equals("trade_stock_in_detail")) handleStockInDetail(body);
-                if(t.equals("trade_stock_out_detail")) handleStockOutDetail(body);
-                if(t.equals("trade_sales_main")) finance.generateVoucherFromSale(newId);
-                if(t.equals("trade_purchase_main")) finance.generateVoucherFromPurchase(newId);
-            } catch (Exception e) {
-                System.err.println("Table insert hook warning for " + t + " id=" + newId + ": " + e.getMessage());
-            }
-            return Result.ok("新增成功");
-        }catch(Exception e){return Result.error("新增失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
+            String warning = runInsertHooks(t, newId, clean);
+            Map<String,Object> data = new HashMap<>();
+            data.put("id", newId);
+            if (warning != null) data.put("warning", warning);
+            return Result.ok(data);
+        }catch(IllegalArgumentException e){return Result.error(e.getMessage());}
+        catch(Exception e){return Result.error("新增失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
     }
+
+    /**
+     * 单据联动钩子 —— 数据完整性分两级：
+     *   硬（异常上抛→@Transactional 整体回滚）：库存主/明细联动 —— 库存真源不容静默断裂；
+     *   软（日志+warning）：销售/采购凭证补生成 —— 财务可事后手动补（/biz/finance/voucher-from-*）。
+     */
+    private String runInsertHooks(String t, Long newId, Map<String,Object> body) {
+        // 库存联动（硬）
+        if(t.equals("trade_stock_in_main")) inventory.applyStockInDoc(str(body.get("in_no")), str(body.getOrDefault("warehouse","默认仓")), str(body.get("ref_no")));
+        if(t.equals("trade_stock_out_main")) inventory.applyStockOutDoc(str(body.get("out_no")), str(body.getOrDefault("warehouse","默认仓")), str(body.get("ref_no")));
+        if(t.equals("trade_stock_in_detail")) inventory.applyStockInLine(body);
+        if(t.equals("trade_stock_out_detail")) inventory.applyStockOutLine(body);
+        // 凭证生成（软）
+        try {
+            if(t.equals("trade_sales_main")) finance.generateVoucherFromSale(newId);
+            if(t.equals("trade_purchase_main")) finance.generateVoucherFromPurchase(newId);
+        } catch (Exception e) {
+            System.err.println("[voucher-hook] " + t + " id=" + newId + " 凭证生成失败(不阻断，可手动补): " + e.getMessage());
+            return "单据已保存，但凭证自动生成失败：" + e.getMessage() + "（可在会计模块手动补生成）";
+        }
+        return null;
+    }
+
+    private String str(Object o) { return o == null ? "" : String.valueOf(o); }
 
     @Transactional
     @PutMapping("/{table}/{id}")
     public Result update(@PathVariable String table, @PathVariable Long id, @RequestBody Map<String,Object> body, HttpServletRequest req) {
         if(!canWrite(String.valueOf(req.getAttribute("role")), table)) return Result.error("权限不足");
         try{String t=safe(table);
-            StringBuilder sb=new StringBuilder("UPDATE "+t+" SET ");List<Object> params=new ArrayList<>();boolean f=true;
-            for(Map.Entry<String,Object> e:body.entrySet()){
-                String k = e.getKey();
-                if("id".equals(k)||"_rowId".equals(k))continue;
-                if(!COL_PATTERN.matcher(k).matches()) continue;
-                if(!f)sb.append(",");
-                sb.append("`").append(k).append("`=?");
-                Object val = e.getValue();
-                if ("".equals(val)) val = null;
-                params.add(val);
-                f=false;
+            meta.validateDictValues(t, body);
+            Map<String,Object> clean = sanitize(t, body);
+            if(clean.isEmpty())return Result.error("无更新字段（提交字段均不是表的真实列）");
+            StringBuilder sb=new StringBuilder("UPDATE "+t+" SET ");List<Object> params=new ArrayList<>();
+            for(Map.Entry<String,Object> e:clean.entrySet()){
+                if(params.size()>0)sb.append(",");
+                sb.append("`").append(e.getKey()).append("`=?");
+                params.add(e.getValue());
             }
-            if(params.isEmpty())return Result.error("无更新字段");
             sb.append(" WHERE id=?");params.add(id);int n=db.update(sb.toString(),params.toArray());
             audit.log(String.valueOf(req.getAttribute("user")),table,"修改","id="+id,audit.getIp(req));
             return n>0?Result.ok("修改成功"):Result.error("记录不存在");
-        }catch(Exception e){return Result.error("修改失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
+        }catch(IllegalArgumentException e){return Result.error(e.getMessage());}
+        catch(Exception e){return Result.error("修改失败: "+(e.getMessage() != null ? e.getMessage() : e.toString()));}
     }
 
     @Transactional
@@ -209,33 +251,10 @@ public class DataController {
         try{String t=safe(table);int n=db.update("DELETE FROM "+t+" WHERE id=?",id);
             audit.log(String.valueOf(req.getAttribute("user")),table,"删除","id="+id,audit.getIp(req));
             return n>0?Result.ok("删除成功"):Result.error("记录不存在");
-        }catch(Exception e){return Result.error("删除失败: "+e.getMessage());}
-    }
-
-    private void handleStockIn(Map<String,Object> body) {
-        List<Map<String,Object>> details=db.queryForList("SELECT * FROM trade_stock_in_detail WHERE in_no=?",body.get("in_no"));
-        for(Map<String,Object> d:details)inventory.stockIn(String.valueOf(d.get("product_code")),String.valueOf(d.get("product_name")),String.valueOf(d.getOrDefault("spec_model","")),String.valueOf(body.getOrDefault("warehouse","默认仓")),String.valueOf(d.getOrDefault("location","")),new java.math.BigDecimal(d.getOrDefault("qty",0).toString()),new java.math.BigDecimal(d.getOrDefault("unit_cost",0).toString()));
-    }
-    private void handleStockOut(Map<String,Object> body) {
-        List<Map<String,Object>> details=db.queryForList("SELECT * FROM trade_stock_out_detail WHERE out_no=?",body.get("out_no"));
-        for(Map<String,Object> d:details)inventory.stockOut(String.valueOf(d.get("product_code")),String.valueOf(body.getOrDefault("warehouse","默认仓")),new java.math.BigDecimal(d.getOrDefault("qty",0).toString()));
-    }
-    /** 明细表 INSERT 时也联动库存（主表先建、明细后补的场景） */
-    private void handleStockInDetail(Map<String,Object> body) {
-        try {
-            Map<String,Object> main = db.queryForMap("SELECT * FROM trade_stock_in_main WHERE in_no=?", body.get("in_no"));
-            inventory.stockIn(String.valueOf(body.get("product_code")), String.valueOf(body.getOrDefault("product_name","")),
-                String.valueOf(body.getOrDefault("spec_model","")), String.valueOf(main.getOrDefault("warehouse","默认仓")),
-                String.valueOf(body.getOrDefault("location","")),
-                new java.math.BigDecimal(body.getOrDefault("qty",0).toString()),
-                new java.math.BigDecimal(body.getOrDefault("unit_cost",0).toString()));
-        } catch (Exception ignored) {}
-    }
-    private void handleStockOutDetail(Map<String,Object> body) {
-        try {
-            Map<String,Object> main = db.queryForMap("SELECT * FROM trade_stock_out_main WHERE out_no=?", body.get("out_no"));
-            inventory.stockOut(String.valueOf(body.get("product_code")), String.valueOf(main.getOrDefault("warehouse","默认仓")),
-                new java.math.BigDecimal(body.getOrDefault("qty",0).toString()));
-        } catch (Exception ignored) {}
+        }catch(Exception e){
+            String msg = e.getMessage() == null ? e.toString() : e.getMessage();
+            if (msg.contains("a foreign key constraint fails")) return Result.error("删除失败：存在关联明细/引用记录（外键保护），请先处理子数据");
+            return Result.error("删除失败: "+msg);
+        }
     }
 }

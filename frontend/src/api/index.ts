@@ -63,6 +63,12 @@ export const bizApi = {
   exportTableCsv: (table: string) => downloadBlob(`/biz/export/${encodeURIComponent(table)}`, `${table}.csv`),
 };
 
+export const metaApi = {
+  tables: () => request<any[]>('/meta/tables'),
+  table: (t: string) => request<any>(`/meta/tables/${encodeURIComponent(t)}`),
+  dicts: () => request<Record<string, any[]>>('/meta/dicts'),
+};
+
 export const rbacApi = {
   listRoles: () => request<any[]>('/auth/rbac/roles'),
   listMenus: () => request<any[]>('/auth/rbac/menus'),
