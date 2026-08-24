@@ -7,13 +7,14 @@ import { useMeta } from '../meta/store';
 const COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
 const EMPTY: { name: string; value: number }[] = [];
 
-function StatCard({ icon, label, value, gradient }: { icon: string; label: string; value: string; gradient: string }) {
+function StatCard({ icon, label, value, gradient, sub }: { icon: string; label: string; value: string; gradient: string; sub?: string }) {
   return (
     <div className="erp-card erp-card-hover p-5">
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs text-slate-400 font-medium mb-1.5">{label}</p>
           <p className="text-2xl font-bold text-slate-800 tracking-tight tabular-nums">{value}</p>
+          {sub && <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block"></span>{sub}</p>}
         </div>
         <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl bg-gradient-to-br ${gradient}`} style={{ boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>{icon}</div>
       </div>
@@ -69,16 +70,61 @@ function GuidanceCard({ steps, linkages }: { steps: string[]; linkages: string[]
   );
 }
 
+const FEED_META: Record<string, { icon: string; cls: string }> = {
+  sale: { icon: '💰', cls: 'bg-blue-50 text-blue-600' },
+  purchase: { icon: '🛒', cls: 'bg-cyan-50 text-cyan-600' },
+  voucher: { icon: '📒', cls: 'bg-amber-50 text-amber-600' },
+  approval: { icon: '🔁', cls: 'bg-violet-50 text-violet-600' },
+  stock: { icon: '📦', cls: 'bg-emerald-50 text-emerald-600' },
+};
+
+/** 经营动态：最近的销售/采购/凭证/审批/库存事件，业务脉搏一目了然 */
+function ActivityFeed({ items }: { items: any[] }) {
+  return (
+    <div className="erp-card p-5 h-full">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">⚡ 经营动态</h3>
+        <span className="text-[11px] text-slate-400">最近 {items.length} 条</span>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-xs text-slate-400 text-center py-8">暂无业务动态 —— 发生销售/采购/审批等业务后自动呈现</p>
+      ) : (
+        <div className="space-y-2.5 max-h-[300px] overflow-y-auto pr-1">
+          {items.map((it, i) => {
+            const m = FEED_META[it.kind] || FEED_META.stock;
+            const amt = Number(it.amount);
+            return (
+              <div key={i} className="flex items-center gap-3 py-1.5 border-b border-slate-50 last:border-0">
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 ${m.cls}`}>{m.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-slate-700 truncate">{it.title}</p>
+                  <p className="text-[11px] text-slate-400 truncate">{it.sub || '—'} · {String(it.date || '').slice(0, 10)}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  {Number.isFinite(amt) && amt !== 0 && <p className="text-xs font-semibold text-slate-700 tabular-nums">¥{amt.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>}
+                  {it.status && <p className="text-[10px] text-slate-400">{it.status}</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const { currentUser, users } = useAuth();
   const { tables } = useMeta();
   const [data, setData] = useState<any>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [activity, setActivity] = useState<any[]>([]);
   useEffect(() => {
     let cancelled = false;
     setLoadFailed(false);
     bizApi.dashboard().then(r => { if (!cancelled) setData(r.data); })
       .catch(() => { if (!cancelled) setLoadFailed(true); });
+    bizApi.activityFeed().then(r => { if (!cancelled) setActivity(r.data || []); }).catch(() => {});
     return () => { cancelled = true; };
   }, []);
 
@@ -109,20 +155,26 @@ export default function Dashboard() {
     </div>
   );
 
+  const curMonthSales = n2v(salesMonthly.length ? salesMonthly[salesMonthly.length - 1].value : 0);
+  const curMonthPurchase = n2v(purchaseMonthly.length ? purchaseMonthly[purchaseMonthly.length - 1].value : 0);
+
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
-      <GuidanceCard
-        steps={[
-          '第一步：观察顶部 Hero 看板，查看当前在线人员与待审核注册用户。',
-          '第二步：查阅 KPI 指标卡，销售额/采购额/订单数/净利润与实际业务完全一致。',
-          '第三步：悬停趋势图与存货分布图，洞察企业存货占用与周度/月度销售波动。'
-        ]}
-        linkages={[
-          '【销售出库】完成 ➔ 自动累加累计销售总额、总订单数并更新销售趋势图。',
-          '【采购入库】完成 ➔ 自动累加采购总额并更新采购趋势图。',
-          '【期末关账】完成 ➔ 自动提取 4104 科目净利润并同步至经营 KPI 看板。'
-        ]}
-      />
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_370px] gap-6 items-start">
+        <GuidanceCard
+          steps={[
+            '第一步：观察顶部 Hero 看板，查看当前在线人员与待审核注册用户。',
+            '第二步：查阅 KPI 指标卡，销售额/采购额/订单数/净利润与实际业务完全一致。',
+            '第三步：悬停趋势图与存货分布图，洞察企业存货占用与周度/月度销售波动。'
+          ]}
+          linkages={[
+            '【销售出库】完成 ➔ 自动累加累计销售总额、总订单数并更新销售趋势图。',
+            '【采购入库】完成 ➔ 自动累加采购总额并更新采购趋势图。',
+            '【期末关账】完成 ➔ 自动提取 4104 科目净利润并同步至经营 KPI 看板。'
+          ]}
+        />
+        <ActivityFeed items={activity} />
+      </div>
       {/* Hero Banner */}
       <div className="rounded-2xl p-8 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed, #6366f1)' }}>
         <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 1px, transparent 0)', backgroundSize: '30px 30px' }}></div>
@@ -152,11 +204,11 @@ export default function Dashboard() {
 
       {/* KPI Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600"/>
+        <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600" sub={`本月新增 ¥${fmt(curMonthSales)}`}/>
         <StatCard icon="📦" label="累计销售单数" value={n2v(stats.totalOrders?.value).toLocaleString()} gradient="from-indigo-400 to-indigo-600"/>
         <StatCard icon="👥" label="客户总数" value={n2v(stats.totalCustomers?.value).toLocaleString()} gradient="from-emerald-400 to-emerald-600"/>
         <StatCard icon="🏗️" label="累计生产产量" value={`${fmt(n2v(stats.productionOutput?.value))}件`} gradient="from-orange-400 to-orange-600"/>
-        <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600"/>
+        <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600" sub="4104 本年利润结转"/>
       </div>
 
       {/* Charts Row 1 */}
@@ -241,14 +293,15 @@ export default function Dashboard() {
         {[
           { label: '准时交货率', value: `${n2v(stats.onTimeDelivery?.value)}%`, from: '#3b82f6', to: '#2563eb' },
           { label: '质量合格率', value: `${n2v(stats.qualityRate?.value)}%`, from: '#10b981', to: '#059669' },
-          { label: '累计采购总额', value: `¥${fmt(n2v(stats.totalPurchase?.value))}`, from: '#8b5cf6', to: '#7c3aed' },
-          { label: '在编员工数', value: n2v(stats.totalEmployees?.value), from: '#f59e0b', to: '#d97706' },
+          { label: '累计采购总额', value: `¥${fmt(n2v(stats.totalPurchase?.value))}`, from: '#8b5cf6', to: '#7c3aed', sub: `本月新增 ¥${fmt(curMonthPurchase)}` },
+          { label: '在编员工数', value: String(n2v(stats.totalEmployees?.value)), from: '#f59e0b', to: '#d97706' },
         ].map((c, i) => (
           <div key={i} className="rounded-2xl p-5 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${c.from}, ${c.to})`, boxShadow: '0 8px 20px -6px rgba(0,0,0,0.15)' }}>
             <div className="absolute -top-6 -right-6 w-24 h-24 rounded-full bg-white/10"></div>
             <div className="relative">
               <div className="text-sm opacity-80 mb-1.5 font-medium">{c.label}</div>
               <div className="text-3xl font-bold tracking-tight tabular-nums">{c.value}</div>
+              {c.sub && <div className="text-[11px] opacity-75 mt-1.5 tabular-nums">{c.sub}</div>}
             </div>
           </div>
         ))}

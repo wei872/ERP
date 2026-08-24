@@ -26,6 +26,7 @@ import { lazy, Suspense } from 'react';
 
 const AuthProvider = lazy(() => import('./context/AuthContext').then(m => ({ default: m.AuthProvider })));
 const Layout = lazy(() => import('./components/Layout'));
+import ToastHost from './components/ToastHost';
 
 function Loading() {
   return (
@@ -45,6 +46,7 @@ function App() {
           <Layout />
         </AuthProvider>
       </Suspense>
+      <ToastHost />
     </ErrorBoundary>
   );
 }

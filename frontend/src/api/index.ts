@@ -64,6 +64,7 @@ export const bizApi = {
   codeRules: () => request<any[]>('/biz/code-rules'),
   nextCode: (ruleCode: string) => request<{ code: string; rule_name: string; description: string }>(`/biz/next-code/${encodeURIComponent(ruleCode)}`),
   docLinks: (no: string) => request<any>(`/biz/doc-links/${encodeURIComponent(no)}`),
+  activityFeed: () => request<any[]>('/biz/activity-feed'),
   createVoucher: (lines: any[], voucherWord = '记', period?: string) => request('/biz/voucher', { method: 'POST', body: JSON.stringify({ lines, voucher_word: voucherWord, period }) }),
   voucherFromSale: (id: number) => request(`/biz/finance/voucher-from-sale/${id}`, { method: 'POST' }),
   voucherFromPurchase: (id: number) => request(`/biz/finance/voucher-from-purchase/${id}`, { method: 'POST' }),

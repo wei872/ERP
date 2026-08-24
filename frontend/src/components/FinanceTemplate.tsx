@@ -1,3 +1,4 @@
+import { toastNotify } from '../utils/toast';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { finApi } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -20,6 +21,7 @@ function parseJson<T>(s: unknown, fallback: T): T {
 export default function FinanceTemplate() {
   const { currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
+  const [showGuide, setShowGuide] = useState(false);
   const [templates, setTemplates] = useState<Tpl[]>([]);
   const [selectedTpl, setSelectedTpl] = useState<Tpl | null>(null);
   const [instances, setInstances] = useState<Inst[]>([]);
@@ -28,13 +30,12 @@ export default function FinanceTemplate() {
   const [title, setTitle] = useState('');
   const [period, setPeriod] = useState('');
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState('');
   const [error, setError] = useState('');
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadMeta, setUploadMeta] = useState({ name: '', company: '通用', category: 'inventory', instanceMode: 'multi' });
 
-  const toastFn = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500); }, []);
+  const toastFn = useCallback((msg: string) => toastNotify(msg), []);
 
   const loadTemplates = useCallback(async () => {
     setLoading(true); setError('');
@@ -204,7 +205,6 @@ export default function FinanceTemplate() {
 
   return (
     <div className="flex h-full min-h-[calc(100vh-64px)] erp-fade-in">
-      {toast && <div className="erp-toast">{toast}</div>}
       <aside className="w-72 border-r bg-white overflow-y-auto shrink-0">
         <div className="p-4 border-b flex items-center justify-between">
           <div>
@@ -235,13 +235,14 @@ export default function FinanceTemplate() {
       <main className="flex-1 overflow-auto p-6 bg-gray-50 space-y-4">
         {/* UI 引导与数据联动说明 */}
         <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3 max-w-6xl mx-auto">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
-              <span>💡</span> 财务模版库使用指南与 Excel 转换说明
-            </h3>
+          <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
+          <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-300"> <span>💡</span> 财务模版库使用指南与 Excel 转换说明 </h3>
+          <span className="flex items-center gap-2 shrink-0">
             <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">完整样式与公式保留</span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+            <span className="text-indigo-300/70 text-xs">{showGuide ? '▲ 收起' : '▼ 展开'}</span>
+          </span>
+        </button>
+          <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed mt-3 ${showGuide ? '' : 'hidden'}`}>
             <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
               <div className="font-semibold text-amber-300 flex items-center gap-1.5">
                 <span>📝</span> 步骤指引：

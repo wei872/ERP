@@ -1,3 +1,4 @@
+import { toastNotify } from '../utils/toast';
 import { useCallback, useEffect, useState } from 'react';
 import { bizApi } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -18,10 +19,11 @@ export default function WorkflowPage() {
   const [tab, setTab] = useState<'tasks' | 'submit'>('tasks');
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState('');
   const [error, setError] = useState('');
   const [detail, setDetail] = useState<any>(null);
   const [comment, setComment] = useState('');
+
+  const [showGuide, setShowGuide] = useState(false);
 
   // 提交审批表单
   const [submitType, setSubmitType] = useState<typeof APPROVAL_TYPES[number]>('采购审批');
@@ -29,7 +31,7 @@ export default function WorkflowPage() {
   const [amount, setAmount] = useState(0);
   const [remark, setRemark] = useState('');
 
-  const toastFn = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(''), 2500); }, []);
+  const toastFn = useCallback((m: string) => toastNotify(m), []);
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try { const r = await bizApi.myTasks(); setTasks(r.data || []); }
@@ -76,17 +78,19 @@ export default function WorkflowPage() {
 
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
-      {toast && <div className="erp-toast">{toast}</div>}
 
-      {/* UI 引导与数据联动说明 */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+      {/* UI 引导与数据联动说明（默认收起） */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
+        <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
+          <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-300">
             <span>💡</span> 工作流审批使用指南与后台数据联动说明
           </h3>
-          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">多级引擎 + 账务自动扣连</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+          <span className="flex items-center gap-2">
+            <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">多级引擎 + 账务自动扣连</span>
+            <span className="text-indigo-300/70 text-xs">{showGuide ? '▲ 收起' : '▼ 展开'}</span>
+          </span>
+        </button>
+        {showGuide && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed mt-3">
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
             <div className="font-semibold text-amber-300 flex items-center gap-1.5">
               <span>📝</span> 步骤指引：
@@ -107,8 +111,32 @@ export default function WorkflowPage() {
               <li>请假审批终结 ➔ 自动更新 HR 请假记录状态为 `'已批准'`。</li>
             </ul>
           </div>
-        </div>
+        </div>}
       </div>
+
+      {/* 待办概览统计 */}
+      {(() => {
+        const pendingAmount = tasks.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const typeCounts = APPROVAL_TYPES.map(t => ({ t, n: tasks.filter(x => x.approval_type === t).length }));
+        return (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="erp-card p-4">
+              <p className="text-[11px] text-slate-400 font-medium mb-1">我的待办</p>
+              <p className="text-2xl font-bold text-indigo-600 tabular-nums">{tasks.length}</p>
+            </div>
+            <div className="erp-card p-4">
+              <p className="text-[11px] text-slate-400 font-medium mb-1">待审金额合计</p>
+              <p className="text-2xl font-bold text-slate-800 tabular-nums">¥{pendingAmount.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+            </div>
+            {typeCounts.map(({ t, n }) => (
+              <div key={t} className="erp-card p-4">
+                <p className="text-[11px] text-slate-400 font-medium mb-1">{t}</p>
+                <p className={`text-2xl font-bold tabular-nums ${n > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{n}</p>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="flex items-center justify-between">
         <div>

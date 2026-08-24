@@ -1,3 +1,4 @@
+import { toastNotify } from '../utils/toast';
 import { useState, useEffect, useCallback } from 'react';
 import { bizApi, dataApi } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -14,8 +15,8 @@ const ACTIONS: Record<Action, { title: string; icon: string; color: string }> = 
 export default function ProductionPage() {
   const { currentUser } = useAuth();
   const canAccess = currentUser?.role === 'admin' || currentUser?.role === 'production' || currentUser?.role === 'warehouse';
+  const [showGuide, setShowGuide] = useState(false);
   const [action, setAction] = useState<Action>('workorder');
-  const [toast, setToast] = useState('');
   const [result, setResult] = useState<any>(null);
   const [saving, setSaving] = useState(false);
 
@@ -25,7 +26,7 @@ export default function ProductionPage() {
   const [scraps, setScraps] = useState<any[]>([]);
   const [loadingLists, setLoadingLists] = useState(false);
 
-  const toastFn = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(''), 3000); }, []);
+  const toastFn = useCallback((m: string) => toastNotify(m), []);
 
   // 加载系统现有工单、领料单与报废单列表
   const loadLists = useCallback(async () => {
@@ -159,17 +160,17 @@ export default function ProductionPage() {
 
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1350px] mx-auto">
-      {toast && <div className="erp-toast">{toast}</div>}
 
       {/* UI 引导与数据联动说明 */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
-            <span>💡</span> 生产管理使用指南与后台数据联动说明
-          </h3>
-          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">工单全生命周期</span>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
+        <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
+          <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-300"> <span>💡</span> 生产管理使用指南与后台数据联动说明 </h3>
+          <span className="flex items-center gap-2 shrink-0">
+            <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">工单全生命周期</span>
+            <span className="text-indigo-300/70 text-xs">{showGuide ? '▲ 收起' : '▼ 展开'}</span>
+          </span>
+        </button>
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed mt-3 ${showGuide ? '' : 'hidden'}`}>
           <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
             <div className="font-semibold text-amber-300 flex items-center gap-1.5">
               <span>📝</span> 步骤指引：

@@ -1,3 +1,4 @@
+import { toastNotify } from '../utils/toast';
 import { useState } from 'react';
 import { bizApi, dataApi } from '../api';
 
@@ -8,11 +9,10 @@ export default function MrpPage() {
   const [qty, setQty] = useState(1);
   const [costCode, setCostCode] = useState('');
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState('');
   const [cost, setCost] = useState<number | null>(null);
   const [mrpList, setMrpList] = useState<any[]>([]);
 
-  const toastFn = (m: string) => { setToast(m); setTimeout(() => setToast(''), 2500); };
+  const toastFn = (m: string) => toastNotify(m);
 
   const loadMrpRows = async () => {
     try {
@@ -63,7 +63,6 @@ export default function MrpPage() {
 
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1200px] mx-auto">
-      {toast && <div className="erp-toast">{toast}</div>}
       <div>
         <h2 className="text-xl font-bold text-gray-800">🧮 MRP 物料需求计划</h2>
         <p className="text-sm text-gray-500 mt-1">按产品净需求运算 + 自动拉起采购/生产 + BOM 成本递归滚算</p>

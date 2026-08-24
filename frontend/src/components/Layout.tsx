@@ -1,4 +1,4 @@
-import { useState, useMemo, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
@@ -43,6 +43,18 @@ export default function Layout() {
   const [page, setPage] = useState<Page>({ type: 'dashboard' });
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  // 移动端：侧边栏变为抽屉式导航
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches);
+  const [mobileNav, setMobileNav] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 767px)');
+    const h = (e: MediaQueryListEvent) => { setIsMobile(e.matches); if (!e.matches) setMobileNav(false); };
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, []);
+  /** 导航跳转（移动端同时收起抽屉） */
+  const go = (p: Page) => { setPage(p); if (isMobile) setMobileNav(false); };
+  const expanded = sidebarOpen || isMobile;
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
   const pendingCount = users.filter(u => u.status === 'pending').length;
@@ -86,26 +98,31 @@ export default function Layout() {
   };
 
   return (<div className="flex h-screen bg-slate-50 overflow-hidden">
-    <aside className={`${sidebarOpen ? 'w-64' : 'w-16'} bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 transition-all duration-300 flex flex-col shrink-0 overflow-hidden border-r border-slate-700/50`} style={{ boxShadow: '4px 0 24px -8px rgba(0,0,0,0.3)' }}>
+    {/* 移动端抽屉遮罩 */}
+    {isMobile && mobileNav && <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] z-40 erp-fade-in" onClick={() => setMobileNav(false)} />}
+    <aside className={isMobile
+      ? `fixed inset-y-0 left-0 z-50 w-64 bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 flex flex-col border-r border-slate-700/50 transition-transform duration-300 ${mobileNav ? 'translate-x-0' : '-translate-x-full'}`
+      : `${sidebarOpen ? 'w-64' : 'w-16'} bg-gradient-to-b from-slate-900 via-slate-800 to-slate-900 transition-all duration-300 flex flex-col shrink-0 overflow-hidden border-r border-slate-700/50`}
+      style={isMobile ? undefined : { boxShadow: '4px 0 24px -8px rgba(0,0,0,0.3)' }}>
       <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10 shrink-0">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white font-bold text-base" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 12px rgba(99,102,241,0.4)' }}>E</div>
-        {sidebarOpen && <div className="min-w-0"><h1 className="text-white font-bold text-sm leading-tight tracking-tight">ERP 管理系统</h1><p className="text-slate-400 text-[10px] mt-0.5">{tables.length} 张表 · {Object.keys(tree).length} 个模块</p></div>}
+        {expanded && <div className="min-w-0"><h1 className="text-white font-bold text-sm leading-tight tracking-tight">ERP 管理系统</h1><p className="text-slate-400 text-[10px] mt-0.5">{tables.length} 张表 · {Object.keys(tree).length} 个模块</p></div>}
       </div>
       <nav className="flex-1 overflow-y-auto py-2 px-2">
         {([['dashboard','控制台','📊'],['report','报表中心','📈'],['finance','财务模版','💰']] as const).map(([type, label, icon]) => (
-          <button key={type} onClick={() => setPage({ type: type as any })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{icon}</span>{sidebarOpen && <span>{label}</span>}</button>
+          <button key={type} onClick={() => go({ type: type as any })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{icon}</span>{expanded && <span>{label}</span>}</button>
         ))}
-        {currentUser.role === 'admin' && (<button onClick={() => setPage({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{sidebarOpen && <span className="flex items-center gap-2">用户管理{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
-        {currentUser.role === 'admin' && (<button onClick={() => setPage({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{sidebarOpen && <span>RBAC 权限矩阵</span>}</button>)}
-        {sidebarOpen && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">业务操作</div>}
-        {sidebarOpen && BIZ_PAGES.filter(b => b.roles.includes(currentUser.role)).map(b => (
-          <button key={b.type} onClick={() => setPage({ type: b.type })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{b.icon}</span><span>{b.label}</span></button>
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{expanded && <span className="flex items-center gap-2">用户管理{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{expanded && <span>RBAC 权限矩阵</span>}</button>)}
+        {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">业务操作</div>}
+        {expanded && BIZ_PAGES.filter(b => b.roles.includes(currentUser.role)).map(b => (
+          <button key={b.type} onClick={() => go({ type: b.type })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{b.icon}</span><span>{b.label}</span></button>
         ))}
         {!sidebarOpen && BIZ_PAGES.filter(b => b.roles.includes(currentUser.role)).slice(0, 4).map(b => (
-          <button key={b.type} onClick={() => setPage({ type: b.type })} className={`w-full flex items-center justify-center py-2.5 rounded-lg text-base transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5'}`} title={b.label}><span>{b.icon}</span></button>
+          <button key={b.type} onClick={() => go({ type: b.type })} className={`w-full flex items-center justify-center py-2.5 rounded-lg text-base transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5'}`} title={b.label}><span>{b.icon}</span></button>
         ))}
-        {sidebarOpen && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">数据模块</div>}
-        {sidebarOpen && visibleModules.map(mod => {
+        {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">数据模块</div>}
+        {expanded && visibleModules.map(mod => {
           const subs = tree[mod]; if (!subs) return null;
           const isExpanded = expandedMods.has(mod);
           const userPerms = currentUser.permissions || [];
@@ -113,13 +130,16 @@ export default function Layout() {
           if (visibleSubs.length === 0) return null;
           return (<div key={mod} className="mb-0.5"><button onClick={() => toggleMod(mod)} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium transition-all ${isExpanded ? 'text-slate-200 bg-white/5' : 'text-slate-400 hover:bg-white/5'}`}><svg className={`w-3 h-3 shrink-0 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg><span>{mod}</span></button>
           {isExpanded && visibleSubs.map(sub => { const subId = `${mod}::${sub}`; const subExpanded = expandedSubs.has(subId); return (<div key={sub} className="mt-0.5"><button onClick={() => toggleSub(mod, sub)} className="w-full flex items-center gap-2 pl-7 pr-3 py-1.5 rounded-lg text-[11px] transition-all hover:bg-white/5 text-slate-500 hover:text-slate-300"><svg className={`w-2.5 h-2.5 shrink-0 transition-transform duration-200 ${subExpanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7"/></svg><span className="truncate flex-1 text-left">{sub}</span><span className="text-[10px] text-slate-600 bg-slate-700/40 px-1.5 py-0.5 rounded">{subs[sub].length}</span></button>
-          {subExpanded && subs[sub].map((t) => (<button key={t.table} onClick={() => setPage({ type: 'table', tableKey: t.table })} className={`w-full text-left pl-11 pr-3 py-1.5 rounded-lg text-[11px] transition-all truncate block ${page.type === 'table' && page.tableKey === t.table ? 'text-indigo-300 bg-indigo-500/10 font-medium' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}>{t.cnName}</button>))}</div>);})}</div>);})}
+          {subExpanded && subs[sub].map((t) => (<button key={t.table} onClick={() => go({ type: 'table', tableKey: t.table })} className={`w-full text-left pl-11 pr-3 py-1.5 rounded-lg text-[11px] transition-all truncate block ${page.type === 'table' && page.tableKey === t.table ? 'text-indigo-300 bg-indigo-500/10 font-medium' : 'text-slate-500 hover:text-slate-300 hover:bg-white/5'}`}>{t.cnName}</button>))}</div>);})}</div>);})}
       </nav>
-      <button onClick={() => setSidebarOpen(!sidebarOpen)} className="flex items-center justify-center h-11 border-t border-white/10 text-slate-500 hover:text-slate-200 transition-colors shrink-0"><svg className={`w-4 h-4 transition-transform duration-300 ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg></button>
+      <button onClick={() => isMobile ? setMobileNav(false) : setSidebarOpen(!sidebarOpen)} className="flex items-center justify-center h-11 border-t border-white/10 text-slate-500 hover:text-slate-200 transition-colors shrink-0"><svg className={`w-4 h-4 transition-transform duration-300 ${sidebarOpen ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg></button>
     </aside>
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-6 h-16 flex items-center justify-between shrink-0" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-        <h2 className="text-[15px] font-semibold text-slate-800 truncate tracking-tight">{getPageTitle()}</h2>
+      <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between shrink-0 gap-2" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          {isMobile && <button onClick={() => setMobileNav(true)} title="打开菜单" className="p-2 -ml-1 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors shrink-0"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg></button>}
+          <h2 className="text-[15px] font-semibold text-slate-800 truncate tracking-tight">{getPageTitle()}</h2>
+        </div>
         <div className="flex items-center gap-3">
           <span className={`erp-badge ${ROLE_COLORS[currentUser.role]}`}>{ROLE_LABELS[currentUser.role]}</span>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>{currentUser.realName[0]}</div>

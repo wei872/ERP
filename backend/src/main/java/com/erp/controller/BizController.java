@@ -243,6 +243,41 @@ public class BizController {
         } catch (Exception e) { return Result.error("销售出库联动失败: " + e.getMessage()); }
     }
 
+    // ── 经营动态：最近业务事件聚合（仪表盘实时脉搏） ──
+    @GetMapping("/activity-feed") public Result activityFeed() {
+        try {
+            List<Map<String,Object>> items = new ArrayList<>();
+            for (Map<String,Object> r : db.queryForList("SELECT sales_no no, customer_name who, total_amount amount, sales_date dt, sales_status st FROM trade_sales_main ORDER BY id DESC LIMIT 4"))
+                items.add(feedItem("sale", "销售单 " + r.get("no"), str2(r.get("who")), r.get("amount"), r.get("dt"), str2(r.get("st"))));
+            for (Map<String,Object> r : db.queryForList("SELECT purchase_no no, supplier_name who, total_amount amount, purchase_date dt, purchase_status st FROM trade_purchase_main ORDER BY id DESC LIMIT 4"))
+                items.add(feedItem("purchase", "采购单 " + r.get("no"), str2(r.get("who")), r.get("amount"), r.get("dt"), str2(r.get("st"))));
+            for (Map<String,Object> r : db.queryForList("SELECT voucher_no no, remark who, debit_total amount, voucher_date dt, voucher_status st FROM voucher_main ORDER BY id DESC LIMIT 4"))
+                items.add(feedItem("voucher", "凭证 " + r.get("no"), str2(r.get("who")), r.get("amount"), r.get("dt"), str2(r.get("st"))));
+            for (Map<String,Object> r : db.queryForList("SELECT approval_no no, CONCAT(approval_type, ' · ', applicant) who, amount, submit_date dt, approval_status st FROM oa_approval_main ORDER BY id DESC LIMIT 3"))
+                items.add(feedItem("approval", "审批 " + r.get("no"), str2(r.get("who")), r.get("amount"), r.get("dt"), str2(r.get("st"))));
+            for (Map<String,Object> r : db.queryForList("SELECT product_name who, change_type, change_qty amount, ref_no no, change_date dt FROM trade_stock_log ORDER BY id DESC LIMIT 3"))
+                items.add(feedItem("stock", str2(r.get("change_type")) + " " + str2(r.get("no")), str2(r.get("who")), r.get("amount"), r.get("dt"), str2(r.get("change_type"))));
+            // 按日期倒序（null 最后）
+            items.sort((a, b) -> {
+                Object da = a.get("date"), dbb = b.get("date");
+                if (da == null && dbb == null) return 0;
+                if (da == null) return 1;
+                if (dbb == null) return -1;
+                return String.valueOf(dbb).compareTo(String.valueOf(da));
+            });
+            return Result.ok(items.subList(0, Math.min(10, items.size())));
+        } catch (Exception e) { return Result.error("经营动态加载失败: " + e.getMessage()); }
+    }
+
+    private String str2(Object o) { return o == null ? "" : String.valueOf(o); }
+
+    private Map<String,Object> feedItem(String kind, String title, String sub, Object amount, Object date, String status) {
+        Map<String,Object> m = new LinkedHashMap<>();
+        m.put("kind", kind); m.put("title", title); m.put("sub", sub);
+        m.put("amount", amount); m.put("date", date); m.put("status", status);
+        return m;
+    }
+
     // ── 批次追溯：正向基因图谱 / 反向按销售单追溯 ──
     @GetMapping("/batch-trace/{batchNo}") public Result batchTrace(@PathVariable String batchNo) {
         try { return Result.ok(batchService.trace(batchNo)); }
