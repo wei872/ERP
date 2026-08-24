@@ -18,6 +18,7 @@ const MrpPage = lazy(() => import('./MrpPage'));
 const InventoryClosingPage = lazy(() => import('./InventoryClosingPage'));
 const RbacPage = lazy(() => import('./RbacPage'));
 const ReconciliationPage = lazy(() => import('./ReconciliationPage'));
+const AuditLogPage = lazy(() => import('./AuditLogPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -27,7 +28,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'workflow',       label: '工作流审批',   icon: '🔁', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -37,6 +38,7 @@ const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[]
   { type: 'production',     label: '生产管理',     icon: '🏗️', roles: ['admin','production','warehouse'] },
   { type: 'mrp',            label: 'MRP运算',      icon: '🧮', roles: ['admin','production'] },
   { type: 'ops',            label: '库存直调&期末', icon: '🛠️', roles: ['admin','warehouse','accounting'] },
+  { type: 'audit',          label: '审计日志',     icon: '🕵️', roles: ['admin'] },
 ];
 
 export default function Layout() {
@@ -74,6 +76,7 @@ export default function Layout() {
     { label: 'MRP运算', icon: '🧮', page: { type: 'mrp' } },
     { label: '库存直调&期末', icon: '🛠️', page: { type: 'ops' } },
     { label: '财务模版库', icon: '💰', page: { type: 'finance' } },
+    { label: '审计日志', icon: '🕵️', page: { type: 'audit' } },
   ];
   const gResults = useMemo(() => {
     const q = gq.trim().toLowerCase();
@@ -112,6 +115,16 @@ export default function Layout() {
   const n = (v: unknown) => Number(v) || 0;
   const todoTotal = todos ? n(todos.pendingApprovals) + n(todos.lowStock?.count) + n(todos.overdueReceivable?.count) + n(todos.overduePayable?.count) + n(todos.pendingUsers) : 0;
   const todoJump = (p: Page) => { go(p); setTodoOpen(false); };
+
+  // ── 常用表收藏（表格页星标切换，跨事件同步） ──
+  const readFavs = () => { try { return JSON.parse(localStorage.getItem('erp_fav_tables') || '[]') as string[]; } catch { return []; } };
+  const [favTables, setFavTables] = useState<string[]>(readFavs);
+  useEffect(() => {
+    const h = () => setFavTables(readFavs());
+    window.addEventListener('erp:favs', h);
+    window.addEventListener('storage', h);
+    return () => { window.removeEventListener('erp:favs', h); window.removeEventListener('storage', h); };
+  }, []);
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
   const pendingCount = users.filter(u => u.status === 'pending').length;
@@ -148,6 +161,7 @@ export default function Layout() {
     if (page.type === 'mrp') return '🧮 MRP 物料需求';
     if (page.type === 'ops') return '🛠️ 库存直调 & 期末结账';
     if (page.type === 'reconciliation') return '💸 应收应付核销';
+    if (page.type === 'audit') return '🕵️ 审计日志';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -169,6 +183,14 @@ export default function Layout() {
         ))}
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{expanded && <span className="flex items-center gap-2">用户管理{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{expanded && <span>RBAC 权限矩阵</span>}</button>)}
+        {expanded && favTables.length > 0 && (<div className="mb-1">
+          <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">⭐ 常用收藏</div>
+          {favTables.map(tk => { const t = tables.find(x => x.table === tk); if (!t) return null; return (
+            <button key={tk} onClick={() => go({ type: 'table', tableKey: tk })} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium transition-all mb-0.5 ${page.type === 'table' && page.tableKey === tk ? 'bg-amber-400/15 text-amber-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}>
+              <span className="shrink-0">⭐</span><span className="truncate">{t.cnName}</span>
+            </button>
+          ); })}
+        </div>)}
         {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">业务操作</div>}
         {expanded && BIZ_PAGES.filter(b => b.roles.includes(currentUser.role)).map(b => (
           <button key={b.type} onClick={() => go({ type: b.type })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{b.icon}</span><span>{b.label}</span></button>
@@ -312,6 +334,7 @@ export default function Layout() {
         {page.type === 'mrp' && <MrpPage />}
         {page.type === 'ops' && <InventoryClosingPage />}
         {page.type === 'reconciliation' && <ReconciliationPage />}
+        {page.type === 'audit' && <AuditLogPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
         </Suspense>

@@ -55,6 +55,22 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const [linkNo, setLinkNo] = useState('');
   // 主单明细钻取
   const [drillKey, setDrillKey] = useState('');
+  // 常用表收藏
+  const [fav, setFav] = useState(false);
+  useEffect(() => {
+    try { setFav((JSON.parse(localStorage.getItem('erp_fav_tables') || '[]') as string[]).includes(tableKey)); }
+    catch { setFav(false); }
+  }, [tableKey]);
+  const toggleFav = () => {
+    let favs: string[] = [];
+    try { favs = JSON.parse(localStorage.getItem('erp_fav_tables') || '[]'); } catch { /* ignore */ }
+    const has = favs.includes(tableKey);
+    favs = has ? favs.filter(f => f !== tableKey) : [...favs, tableKey].slice(-12);
+    localStorage.setItem('erp_fav_tables', JSON.stringify(favs));
+    setFav(!has);
+    window.dispatchEvent(new CustomEvent('erp:favs'));
+    toastNotify(has ? '已取消收藏' : '已收藏，侧边栏「⭐ 常用收藏」一键直达');
+  };
   // 列排序（服务端排序，白名单校验）
   const [sortCol, setSortCol] = useState('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -312,6 +328,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
         <div className="flex items-center gap-3">
           <h3 className="text-xl font-bold text-slate-800 tracking-tight">{table.cnName}</h3>
           <span className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md font-mono">{tableKey}</span>
+          <button onClick={toggleFav} title={fav ? '取消收藏' : '收藏到侧边栏常用'} className={`text-base leading-none transition-transform hover:scale-125 ${fav ? '' : 'grayscale opacity-40 hover:opacity-80'}`}>⭐</button>
           <span className="text-[11px] text-slate-400">{totalRows} 条 · {table.cols.length} 列</span>
           {isAdmin && <span className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded-md font-medium">管理员</span>}
         </div>
