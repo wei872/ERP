@@ -1,6 +1,7 @@
 import { toastNotify } from '../utils/toast';
 import { useState } from 'react';
 import { bizApi } from '../api';
+import { downloadCsv } from '../utils/csv';
 
 const PRESETS = ['资产', '负债', '权益', '利润', '现金流'] as const;
 type Stmt = 'balance' | 'income' | 'cashflow';
@@ -28,6 +29,36 @@ export default function FinancialStatementsPage() {
   };
 
   const toastFn = (m: string) => toastNotify(m);
+
+  // 导出当前报表为 CSV（带 BOM，Excel 直接打开无乱码）
+  const exportCsv = () => {
+    if (!data) return;
+    const rows: (string | number)[][] = [];
+    if (stmt === 'balance') {
+      rows.push(['资产负债表', `会计期间：${period}`]);
+      rows.push(['资产合计', data.assets, '负债合计', data.liabilities, '所有者权益', data.equity, '负债+权益', data.total_liability_equity]);
+      rows.push([]);
+      rows.push(['科目编码', '科目名称', '期末余额']);
+      (data.assetItems || []).forEach((it: any) => rows.push([it.code, it.name, it.balance]));
+    } else if (stmt === 'income') {
+      rows.push(['利润表', `会计期间：${period}`]);
+      rows.push(['营业收入', data.revenue, '营业成本', data.cost, '毛利润', data.gross_profit, '净利润', data.net_profit]);
+      rows.push([]);
+      rows.push(['科目编码', '科目名称', '借方发生', '贷方发生', '期末余额']);
+      (data.items || []).forEach((it: any) => rows.push([it.subject_code, it.subject_name, it.debit_amount, it.credit_amount, it.end_balance]));
+    } else {
+      rows.push(['现金流量表', `会计期间：${period}`]);
+      rows.push(['现金流入', data.cash_in, '现金流出', data.cash_out, '净现金流', data.net_cash]);
+      rows.push([]);
+      rows.push(['流入明细', '金额']);
+      (data.inflow_items || []).forEach((it: any) => rows.push([it.name, it.value]));
+      rows.push([]);
+      rows.push(['流出明细', '金额']);
+      (data.outflow_items || []).forEach((it: any) => rows.push([it.name, it.value]));
+    }
+    downloadCsv(`${NAMES[stmt]}_${period}.csv`, rows);
+    toastFn(`已导出 ${NAMES[stmt]}（${period}）`);
+  };
 
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
@@ -70,7 +101,12 @@ export default function FinancialStatementsPage() {
           <h2 className="text-xl font-bold text-gray-800">📊 三大财务报表</h2>
           <p className="text-sm text-gray-500 mt-1">按会计期间查询：资产负债表 / 利润表 / 现金流量表（后端基于 account_subject_balance 实时聚合）</p>
         </div>
-        {data && <button onClick={() => window.print()} className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-white hover:bg-slate-700 transition-colors flex items-center gap-1.5">🖨️ 打印报表</button>}
+        {data && (
+          <div className="flex gap-2 no-print">
+            <button onClick={exportCsv} className="px-4 py-2 rounded-lg text-sm bg-white border border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition-colors flex items-center gap-1.5">⬇ 导出 CSV</button>
+            <button onClick={() => window.print()} className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-white hover:bg-slate-700 transition-colors flex items-center gap-1.5">🖨️ 打印报表</button>
+          </div>
+        )}
       </div>
       {/* 打印专用抬头（屏幕上隐藏） */}
       <div className="hidden print:block text-center mb-2">

@@ -47,6 +47,30 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   // 操作指南默认收起，降低视觉噪音
   const [showGuide, setShowGuide] = useState(false);
+  // 列显示自定义（按表持久化到 localStorage）
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
+  const [colPickerOpen, setColPickerOpen] = useState(false);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('erp_cols_' + tableKey);
+      setHiddenCols(new Set(raw ? (JSON.parse(raw) as string[]) : []));
+    } catch { setHiddenCols(new Set()); }
+    setColPickerOpen(false);
+  }, [tableKey]);
+  const toggleCol = (name: string) => {
+    setHiddenCols(prev => {
+      const nx = new Set(prev);
+      if (nx.has(name)) nx.delete(name); else nx.add(name);
+      localStorage.setItem('erp_cols_' + tableKey, JSON.stringify([...nx]));
+      return nx;
+    });
+  };
+  // Esc 关闭弹窗
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeModal(); setLinkData(null); setPreviewImg(null); setColPickerOpen(false); } };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, []);
   const pageSize = 15;
 
 
@@ -285,6 +309,26 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
           <input type="text" value={search} onChange={e => doSearch(e.target.value)} placeholder="搜索..." className="erp-input pl-9 w-56"/>
         </div>
         <button onClick={() => bizApi.exportTableCsv(tableKey).catch(e => toastFn('导出失败: ' + e.message))} className="erp-btn erp-btn-ghost" title="导出 CSV">⬇ CSV</button>
+        {/* 列显示自定义 */}
+        <div className="relative">
+          <button onClick={() => setColPickerOpen(o => !o)} className="erp-btn erp-btn-ghost" title="自定义显示列">⚙ 列</button>
+          {colPickerOpen && (<>
+            <div className="fixed inset-0 z-40" onClick={() => setColPickerOpen(false)} />
+            <div className="absolute right-0 top-full mt-2 w-60 max-h-80 overflow-y-auto bg-white rounded-xl border border-slate-200 shadow-xl z-50 p-3 erp-fade-in">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-slate-600">显示列（{table.cols.length - hiddenCols.size}/{table.cols.length}）</p>
+                <button onClick={() => { setHiddenCols(new Set()); localStorage.removeItem('erp_cols_' + tableKey); }} className="text-[11px] text-indigo-600 hover:underline">恢复全部</button>
+              </div>
+              {table.cols.filter(c => c.name !== 'id').map(c => (
+                <label key={c.name} className="flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs text-slate-600">
+                  <input type="checkbox" checked={!hiddenCols.has(c.name)} onChange={() => toggleCol(c.name)} className="accent-indigo-600"/>
+                  <span className="truncate">{c.cnName}</span>
+                  <span className="ml-auto text-[10px] font-mono text-slate-300">{c.name}</span>
+                </label>
+              ))}
+            </div>
+          </>)}
+        </div>
         {canAdd && <button onClick={() => openModal('add')} disabled={loading} className="erp-btn erp-btn-primary">+ 新增</button>}
       </div>
     </div>
@@ -299,13 +343,13 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
         <table className="erp-table">
           <thead><tr>
             <th className="w-12">#</th>
-            {table.cols.map(col => <th key={col.name} onClick={() => toggleSort(col.name)} title="点击排序" className={`whitespace-nowrap cursor-pointer select-none hover:text-indigo-600 transition-colors ${col.type === 'number' ? 'text-right' : ''}`}>{col.cnName}{sortCol === col.name && <span className="text-indigo-500 ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>}</th>)}
+            {table.cols.filter(c => !hiddenCols.has(c.name)).map(col => <th key={col.name} onClick={() => toggleSort(col.name)} title="点击排序" className={`whitespace-nowrap cursor-pointer select-none hover:text-indigo-600 transition-colors ${col.type === 'number' ? 'text-right' : ''}`}>{col.cnName}{sortCol === col.name && <span className="text-indigo-500 ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>}</th>)}
             <th className="text-center w-40 sticky right-0 bg-slate-50">操作</th>
           </tr></thead>
           <tbody>
             {data.map((row, idx) => <tr key={(row as any).id || idx}>
               <td className="text-[11px] text-slate-400 font-mono">{(currentPage - 1) * pageSize + idx + 1}</td>
-              {table.cols.map(col => { const k = col.name, t = col.type; const v = row[k]; return <td key={k} className="whitespace-nowrap" >
+              {table.cols.filter(c => !hiddenCols.has(c.name)).map(col => { const k = col.name, t = col.type; const v = row[k]; return <td key={k} className="whitespace-nowrap" >
                 {String(v ?? '').startsWith('data:image/') || (t === 'image' && false) ? (
                   v ? <img src={String(v)} alt="发票图片" onClick={() => setPreviewImg(String(v))} className="h-9 w-14 object-cover rounded border border-slate-200 cursor-pointer shadow-sm hover:scale-105 transition-transform" title="点击放大查看图片" /> : <span className="text-slate-300 text-xs italic">无图片</span>
                 ) : t === 'number' ? <span className="font-mono tabular-nums text-slate-700 block text-right">{formatCellNum(v)}</span>
@@ -325,7 +369,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
                 </div>
               </td>
             </tr>)}
-            {data.length === 0 && <tr><td colSpan={table.cols.length + 2} className="px-4 py-16 text-center">
+            {data.length === 0 && <tr><td colSpan={table.cols.filter(c => !hiddenCols.has(c.name)).length + 2} className="px-4 py-16 text-center">
               <div className="text-slate-300 text-4xl mb-3">📭</div>
               <p className="text-slate-400 text-sm">{search ? `未找到匹配 "${search}" 的记录` : '暂无数据'}</p>
             </td></tr>}

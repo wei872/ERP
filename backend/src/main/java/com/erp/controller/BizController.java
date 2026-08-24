@@ -243,6 +243,32 @@ public class BizController {
         } catch (Exception e) { return Result.error("销售出库联动失败: " + e.getMessage()); }
     }
 
+    // ── 待办中心：顶栏铃铛的数据源（审批待办/库存预警/逾期应收应付/待审用户） ──
+    @GetMapping("/todos") public Result todos(HttpServletRequest req) {
+        try {
+            String user = String.valueOf(req.getAttribute("user"));
+            boolean isAdmin = "admin".equals(req.getAttribute("role"));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("pendingApprovals", "admin".equals(user)
+                ? db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理'", Long.class)
+                : db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理' AND assignee=?", Long.class, user));
+            Map<String,Object> low = new LinkedHashMap<>();
+            low.put("count", db.queryForObject("SELECT COUNT(*) FROM trade_inventory_balance WHERE stock_status='预警'", Long.class));
+            low.put("items", db.queryForList("SELECT product_code, product_name, qty, min_stock FROM trade_inventory_balance WHERE stock_status='预警' ORDER BY (qty / NULLIF(min_stock,0)) ASC LIMIT 6"));
+            ret.put("lowStock", low);
+            Map<String,Object> ovR = new LinkedHashMap<>();
+            ovR.put("count", db.queryForObject("SELECT COUNT(*) FROM finance_receivable_main WHERE remain_amount>0 AND due_date<CURDATE()", Long.class));
+            ovR.put("amount", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
+            ret.put("overdueReceivable", ovR);
+            Map<String,Object> ovP = new LinkedHashMap<>();
+            ovP.put("count", db.queryForObject("SELECT COUNT(*) FROM finance_payable_main WHERE remain_amount>0 AND due_date<CURDATE()", Long.class));
+            ovP.put("amount", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_payable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
+            ret.put("overduePayable", ovP);
+            if (isAdmin) ret.put("pendingUsers", db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE status='pending'", Long.class));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("待办加载失败: " + e.getMessage()); }
+    }
+
     // ── 经营动态：最近业务事件聚合（仪表盘实时脉搏） ──
     @GetMapping("/activity-feed") public Result activityFeed() {
         try {

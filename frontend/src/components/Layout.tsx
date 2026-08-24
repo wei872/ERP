@@ -1,7 +1,8 @@
-import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
+import { bizApi } from '../api';
 import Login from './Login';
 import ModulePage from './ModulePage';
 // 业务页面全部懒加载：recharts 等大依赖不进首屏包，显著加快登录后首帧
@@ -89,6 +90,15 @@ export default function Layout() {
     window.addEventListener('erp:navigate', h);
     return () => window.removeEventListener('erp:navigate', h);
   }, []);
+
+  // ── 待办中心：顶栏铃铛（审批待办/库存预警/逾期应收应付/待审用户），60 秒轮询 ──
+  const [todos, setTodos] = useState<any>(null);
+  const [todoOpen, setTodoOpen] = useState(false);
+  const loadTodos = useCallback(() => { bizApi.todos().then(r => setTodos(r.data)).catch(() => {}); }, []);
+  useEffect(() => { loadTodos(); const iv = setInterval(loadTodos, 60000); return () => clearInterval(iv); }, [loadTodos]);
+  const n = (v: unknown) => Number(v) || 0;
+  const todoTotal = todos ? n(todos.pendingApprovals) + n(todos.lowStock?.count) + n(todos.overdueReceivable?.count) + n(todos.overduePayable?.count) + n(todos.pendingUsers) : 0;
+  const todoJump = (p: Page) => { go(p); setTodoOpen(false); };
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
   const pendingCount = users.filter(u => u.status === 'pending').length;
@@ -196,7 +206,71 @@ export default function Layout() {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* 待办铃铛 */}
+          <div className="relative">
+            <button onClick={() => { setTodoOpen(o => !o); loadTodos(); }} title="待办中心" className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors">
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3A6 6 0 006 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+              {todoTotal > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">{todoTotal > 99 ? '99+' : todoTotal}</span>}
+            </button>
+            {todoOpen && (<>
+              <div className="fixed inset-0 z-40" onClick={() => setTodoOpen(false)} />
+              <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 overflow-hidden erp-fade-in">
+                <div className="px-4 py-3 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex items-center justify-between">
+                  <span className="text-sm font-semibold">🔔 待办中心</span>
+                  <span className="text-[11px] text-indigo-200">{todoTotal} 项待处理</span>
+                </div>
+                <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-50">
+                  {todoTotal === 0 && <p className="px-4 py-8 text-center text-xs text-slate-400">🎉 太棒了，暂无待办事项</p>}
+                  {todos && n(todos.pendingApprovals) > 0 && (
+                    <button onClick={() => todoJump({ type: 'workflow' })} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-indigo-50/60 transition-colors">
+                      <span className="w-9 h-9 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0">🔁</span>
+                      <span className="flex-1 min-w-0"><span className="block text-sm font-medium text-slate-700">审批待办</span><span className="block text-[11px] text-slate-400">点击进入工作流处理</span></span>
+                      <span className="text-sm font-bold text-violet-600 tabular-nums">{n(todos.pendingApprovals)}</span>
+                    </button>
+                  )}
+                  {todos && n(todos.lowStock?.count) > 0 && (
+                    <button onClick={() => todoJump({ type: 'table', tableKey: 'trade_inventory_balance' })} className="w-full px-4 py-3 text-left hover:bg-amber-50/60 transition-colors">
+                      <span className="flex items-center gap-3">
+                        <span className="w-9 h-9 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">📦</span>
+                        <span className="flex-1 min-w-0"><span className="block text-sm font-medium text-slate-700">库存预警</span><span className="block text-[11px] text-slate-400">低于安全库存，点击补货</span></span>
+                        <span className="text-sm font-bold text-amber-600 tabular-nums">{n(todos.lowStock?.count)}</span>
+                      </span>
+                      <span className="mt-2 space-y-1 block">
+                        {(todos.lowStock.items || []).slice(0, 3).map((it: any) => (
+                          <span key={it.product_code} className="flex justify-between text-[11px] text-slate-500 bg-slate-50 rounded-md px-2 py-1">
+                            <span className="truncate">{it.product_name}</span>
+                            <span className="tabular-nums shrink-0 ml-2">现 {Number(it.qty || 0)} / 安全 {Number(it.min_stock || 0)}</span>
+                          </span>
+                        ))}
+                      </span>
+                    </button>
+                  )}
+                  {todos && n(todos.overdueReceivable?.count) > 0 && (
+                    <button onClick={() => todoJump({ type: 'reconciliation' })} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-red-50/60 transition-colors">
+                      <span className="w-9 h-9 rounded-xl bg-red-50 text-red-500 flex items-center justify-center shrink-0">💰</span>
+                      <span className="flex-1 min-w-0"><span className="block text-sm font-medium text-slate-700">应收逾期</span><span className="block text-[11px] text-slate-400">¥{n(todos.overdueReceivable?.amount).toLocaleString()} 待催收</span></span>
+                      <span className="text-sm font-bold text-red-500 tabular-nums">{n(todos.overdueReceivable?.count)}</span>
+                    </button>
+                  )}
+                  {todos && n(todos.overduePayable?.count) > 0 && (
+                    <button onClick={() => todoJump({ type: 'reconciliation' })} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-orange-50/60 transition-colors">
+                      <span className="w-9 h-9 rounded-xl bg-orange-50 text-orange-500 flex items-center justify-center shrink-0">🧾</span>
+                      <span className="flex-1 min-w-0"><span className="block text-sm font-medium text-slate-700">应付逾期</span><span className="block text-[11px] text-slate-400">¥{n(todos.overduePayable?.amount).toLocaleString()} 待安排付款</span></span>
+                      <span className="text-sm font-bold text-orange-500 tabular-nums">{n(todos.overduePayable?.count)}</span>
+                    </button>
+                  )}
+                  {todos && n(todos.pendingUsers) > 0 && (
+                    <button onClick={() => todoJump({ type: 'users' })} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-blue-50/60 transition-colors">
+                      <span className="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0">👤</span>
+                      <span className="flex-1 min-w-0"><span className="block text-sm font-medium text-slate-700">用户待审核</span><span className="block text-[11px] text-slate-400">新注册账号等待开通</span></span>
+                      <span className="text-sm font-bold text-blue-500 tabular-nums">{n(todos.pendingUsers)}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </>)}
+          </div>
           <span className={`erp-badge ${ROLE_COLORS[currentUser.role]}`}>{ROLE_LABELS[currentUser.role]}</span>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>{currentUser.realName[0]}</div>
           <span className="text-sm text-slate-600 hidden md:block font-medium">{currentUser.realName}</span>
