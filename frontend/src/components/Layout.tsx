@@ -1,21 +1,26 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, lazy, Suspense } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
 import Login from './Login';
-import Dashboard from './Dashboard';
 import ModulePage from './ModulePage';
-import ReportPage from './ReportPage';
-import UserManagement from './UserManagement';
-import FinanceTemplate from './FinanceTemplate';
-import WorkflowPage from './WorkflowPage';
-import VoucherPage from './VoucherPage';
-import FinancialStatementsPage from './FinancialStatementsPage';
-import ProductionPage from './ProductionPage';
-import MrpPage from './MrpPage';
-import InventoryClosingPage from './InventoryClosingPage';
-import RbacPage from './RbacPage';
-import ReconciliationPage from './ReconciliationPage';
+// 业务页面全部懒加载：recharts 等大依赖不进首屏包，显著加快登录后首帧
+const Dashboard = lazy(() => import('./Dashboard'));
+const ReportPage = lazy(() => import('./ReportPage'));
+const UserManagement = lazy(() => import('./UserManagement'));
+const FinanceTemplate = lazy(() => import('./FinanceTemplate'));
+const WorkflowPage = lazy(() => import('./WorkflowPage'));
+const VoucherPage = lazy(() => import('./VoucherPage'));
+const FinancialStatementsPage = lazy(() => import('./FinancialStatementsPage'));
+const ProductionPage = lazy(() => import('./ProductionPage'));
+const MrpPage = lazy(() => import('./MrpPage'));
+const InventoryClosingPage = lazy(() => import('./InventoryClosingPage'));
+const RbacPage = lazy(() => import('./RbacPage'));
+const ReconciliationPage = lazy(() => import('./ReconciliationPage'));
+
+function PageFallback() {
+  return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
+}
 
 type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
@@ -122,6 +127,7 @@ export default function Layout() {
         </div>
       </header>
       <main className="flex-1 overflow-auto bg-slate-50 erp-fade-in">
+        <Suspense fallback={<PageFallback />}>
         {page.type === 'dashboard' && <Dashboard />}{page.type === 'report' && <ReportPage />}
         {page.type === 'finance' && <FinanceTemplate />}
         {page.type === 'users' && currentUser.role === 'admin' && <UserManagement />}
@@ -136,6 +142,7 @@ export default function Layout() {
         {page.type === 'reconciliation' && <ReconciliationPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
+        </Suspense>
       </main>
     </div>
   </div>);

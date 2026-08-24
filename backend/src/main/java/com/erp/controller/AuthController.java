@@ -6,12 +6,14 @@ import com.erp.service.AuditService;
 import com.erp.service.RbacService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import javax.annotation.PostConstruct;
 import javax.servlet.http.HttpServletRequest;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/auth")
@@ -23,14 +25,26 @@ public class AuthController {
     private final ObjectMapper om = new ObjectMapper();
     private final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
 
+    /** 是否自动播种演示账号（生产环境通过 SEED_DEMO_USERS=false 关闭） */
+    @Value("${app.seed-demo-users:true}")
+    private boolean seedDemoUsers;
+    /** 首次创建 admin 时使用的初始密码（留空则用默认值；绝不覆盖已有密码） */
+    @Value("${app.seed-admin-password:}")
+    private String seedAdminPassword;
+
     private static final List<String> ALL_MODULES = Arrays.asList(
         "生产模块","客户供应商","进销存管理","人力资源","财务管理","会计凭证","报表中心","质量管理","协同办公","设备管理","售后管理","系统维护"
     );
 
     @PostConstruct void seedUsers() {
         try {
+            // admin 账号：任何环境都保证存在（仅首次创建，绝不覆盖已有密码）。
+            // 生产部署请通过 SEED_ADMIN_PASSWORD 指定强初始密码。
+            String adminPw = (seedAdminPassword != null && !seedAdminPassword.isEmpty()) ? seedAdminPassword : "admin123";
+            ensureDefaultUser(new String[]{"admin",adminPw,"admin","系统管理员","13800000000","管理层","active"});
+            // 其余演示账号：仅在允许播种演示数据时创建
+            if (!seedDemoUsers) return;
             String[][] users = {
-                {"admin","admin123","admin","系统管理员","13800000000","管理层","active"},
                 {"zhangsan","123456","sales","张三","13811111111","销售部","active"},
                 {"lisi","123456","warehouse","李四","13822222222","仓储部","active"},
                 {"wangwu","123456","accounting","王五","13833333333","财务部","active"},
@@ -47,17 +61,47 @@ public class AuthController {
 
     @GetMapping("/all-modules") public Result modules() { return Result.ok(ALL_MODULES); }
 
+    // ── 登录限流：同一「用户名+IP」连续失败 5 次后锁定 15 分钟，防暴力破解 ──
+    private static final int MAX_ATTEMPTS = 5;
+    private static final long LOCK_WINDOW_MS = 15 * 60 * 1000L;
+    private static final Map<String, long[]> ATTEMPTS = new ConcurrentHashMap<>();
+
+    private String attemptKey(String u, String ip) { return u.toLowerCase() + "|" + (ip == null ? "" : ip); }
+
+    /** @return 锁定截止时间戳；0 表示未锁定 */
+    private long lockedUntil(String key) {
+        long[] rec = ATTEMPTS.get(key);
+        if (rec != null && rec[0] >= MAX_ATTEMPTS && System.currentTimeMillis() < rec[1]) return rec[1];
+        return 0L;
+    }
+
+    private void recordFailure(String key) {
+        if (ATTEMPTS.size() > 10000) ATTEMPTS.clear(); // 内存保护：上限兜底
+        long now = System.currentTimeMillis();
+        long[] rec = ATTEMPTS.get(key);
+        if (rec == null || now >= rec[1]) rec = new long[]{0, now + LOCK_WINDOW_MS};
+        rec[0]++;
+        ATTEMPTS.put(key, rec);
+    }
+
     @PostMapping("/login")
     public Result login(@RequestBody Map<String,String> body, HttpServletRequest req) {
         String u = body.get("username") == null ? "" : body.get("username").trim();
         String p = body.get("password") == null ? "" : body.get("password");
         String ip = audit.getIp(req);
+        String aKey = attemptKey(u, ip);
+        long lockUntil = lockedUntil(aKey);
+        if (lockUntil > 0) {
+            long minutes = (lockUntil - System.currentTimeMillis()) / 60000 + 1;
+            audit.logLogin(u, ip, "失败-已锁定");
+            return Result.error("登录失败次数过多，账号已临时锁定，请 " + minutes + " 分钟后再试");
+        }
         try {
             List<Map<String,Object>> rows = db.queryForList("SELECT * FROM sys_user WHERE username=?", u);
-            if (rows.isEmpty()) { audit.logLogin(u, ip, "失败-用户不存在"); return Result.error("用户名或密码错误"); }
+            if (rows.isEmpty()) { recordFailure(aKey); audit.logLogin(u, ip, "失败-用户不存在"); return Result.error("用户名或密码错误"); }
             Map<String,Object> user = rows.get(0);
             String storedHash = String.valueOf(user.getOrDefault("password",""));
-            if (!passwordMatches(p, storedHash)) { audit.logLogin(u, ip, "失败-密码错误"); return Result.error("用户名或密码错误"); }
+            if (!passwordMatches(p, storedHash)) { recordFailure(aKey); audit.logLogin(u, ip, "失败-密码错误"); return Result.error("用户名或密码错误"); }
             upgradeLegacyPassword(user, p, storedHash);
             String st = String.valueOf(user.getOrDefault("status","active"));
             if ("pending".equals(st)) { audit.logLogin(u, ip, "失败-未审核"); return Result.error("账号未审核"); }
@@ -70,22 +114,39 @@ public class AuthController {
             Map<String,Object> cu = new HashMap<>(user); cu.remove("password");
             cu.put("permissions", parsePerms(user));
             result.put("user",cu);
+            ATTEMPTS.remove(aKey);
             audit.logLogin(u, ip, "成功");
             return Result.ok(result);
-        } catch (Exception e) { audit.logLogin(u, ip, "失败-异常"); return Result.error("登录失败: "+e.getMessage()); }
+        } catch (Exception e) { recordFailure(aKey); audit.logLogin(u, ip, "失败-异常"); return Result.error("登录失败，请稍后重试"); }
+    }
+
+    private static final java.util.regex.Pattern USERNAME_PATTERN = java.util.regex.Pattern.compile("^[a-zA-Z0-9_]{3,32}$");
+
+    /** 密码强度：至少 8 位，且同时包含字母与数字 */
+    private boolean validPasswordPolicy(String pw) {
+        if (pw == null || pw.length() < 8 || pw.length() > 64) return false;
+        boolean letter = false, digit = false;
+        for (char c : pw.toCharArray()) {
+            if (Character.isLetter(c)) letter = true;
+            else if (Character.isDigit(c)) digit = true;
+        }
+        return letter && digit;
     }
 
     @PostMapping("/register")
     public Result register(@RequestBody Map<String,Object> body) {
-        String un = String.valueOf(body.get("username"));
+        String un = body.get("username") == null ? "" : String.valueOf(body.get("username")).trim();
+        String pw = body.get("password") == null ? "" : String.valueOf(body.get("password"));
+        if (!USERNAME_PATTERN.matcher(un).matches()) return Result.error("用户名需为 3-32 位字母、数字或下划线");
+        if (!validPasswordPolicy(pw)) return Result.error("密码至少 8 位，且需同时包含字母和数字");
         try {
             Integer c = db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE username=?", Integer.class, un);
             if (c != null && c > 0) return Result.error("用户名已存在");
             db.update("INSERT INTO sys_user(username,password,role,real_name,phone,email,department,status) VALUES(?,?,?,?,?,?,?,?)",
-                un, encoder.encode(String.valueOf(body.get("password"))), body.get("role"), body.get("realName"),
+                un, encoder.encode(pw), body.get("role"), body.get("realName"),
                 body.get("phone"), body.getOrDefault("email",""), body.getOrDefault("department",""), "pending");
             return Result.ok("注册成功，等待审核");
-        } catch (Exception e) { return Result.error("注册失败: "+e.getMessage()); }
+        } catch (Exception e) { return Result.error("注册失败，请稍后重试"); }
     }
 
     @GetMapping("/me")
@@ -159,21 +220,15 @@ public class AuthController {
         return null;
     }
 
+    /**
+     * 仅在用户不存在时创建。已存在的账号（包括 admin）绝不在重启时被覆盖
+     * 密码或资料 —— 否则运维改过的密码会在下次重启时被重置为演示密码。
+     */
     private void ensureDefaultUser(String[] u) {
-        List<Map<String,Object>> rows = db.queryForList("SELECT * FROM sys_user WHERE username=?", u[0]);
+        List<Map<String,Object>> rows = db.queryForList("SELECT id FROM sys_user WHERE username=?", u[0]);
         if (rows.isEmpty()) {
             db.update("INSERT INTO sys_user(username,password,role,real_name,phone,department,status) VALUES(?,?,?,?,?,?,?)",
                 u[0], encoder.encode(u[1]), u[2], u[3], u[4], u[5], u[6]);
-            return;
-        }
-        if ("admin".equals(u[0])) {
-            Map<String,Object> admin = rows.get(0);
-            String storedHash = String.valueOf(admin.getOrDefault("password",""));
-            if (!passwordMatches(u[1], storedHash)) {
-                db.update("UPDATE sys_user SET password=? WHERE username=?", encoder.encode(u[1]), u[0]);
-            }
-            db.update("UPDATE sys_user SET role=?, real_name=?, phone=?, department=?, status=? WHERE username=?",
-                u[2], u[3], u[4], u[5], u[6], u[0]);
         }
     }
 

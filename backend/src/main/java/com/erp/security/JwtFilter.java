@@ -11,7 +11,7 @@ import java.util.List;
 @Component
 public class JwtFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
-    private static final List<String> PUBLIC = Arrays.asList("/auth/login","/auth/register","/auth/all-modules");
+    private static final List<String> PUBLIC = Arrays.asList("/auth/login","/auth/register","/auth/all-modules","/health");
     public JwtFilter(JwtUtil u) { this.jwtUtil = u; }
 
     @Override

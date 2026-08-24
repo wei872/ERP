@@ -1,4 +1,6 @@
-const BASE = '/api';
+// API 基址：默认走同源 /api（nginx 反代）；前后端分离部署时可用构建期环境变量
+// VITE_API_BASE 覆盖，例如：VITE_API_BASE=https://api.example.com/api npm run build
+const BASE = ((import.meta as any).env?.VITE_API_BASE as string | undefined) || '/api';
 async function request<T = any>(url: string, options: RequestInit = {}): Promise<{ success: boolean; data: T; message?: string }> {
   const token = localStorage.getItem('erp_token');
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> || {}) };

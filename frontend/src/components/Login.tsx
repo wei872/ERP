@@ -14,7 +14,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async (e: FormEvent) => { e.preventDefault(); setError(''); if(!username||!password){setError('请输入用户名和密码');return;} setLoading(true); const r=await login(username,password); setLoading(false); if(!r)setError('用户名或密码错误，或账号尚未审核通过'); };
-  const handleRegister = async (e: FormEvent) => { e.preventDefault(); setError(''); if(!username||!password||!realName||!phone){setError('请填写所有必填项');return;} if(password!==confirmPassword){setError('两次密码输入不一致');return;} if(password.length<6){setError('密码至少6位');return;} const r=await register({username,password,role,realName,phone,email,department:depts[role]}); if(r.success){setSuccess('注册成功！请等待管理员审核通过后即可登录。');setTimeout(()=>{setIsLogin(true);setSuccess('');},3000);}else setError(r.message); };
+  const handleRegister = async (e: FormEvent) => { e.preventDefault(); setError(''); if(!username||!password||!realName||!phone){setError('请填写所有必填项');return;} if(password!==confirmPassword){setError('两次密码输入不一致');return;} if(password.length<8||!/[a-zA-Z]/.test(password)||!/\d/.test(password)){setError('密码至少 8 位，且需同时包含字母和数字');return;} const r=await register({username,password,role,realName,phone,email,department:depts[role]}); if(r.success){setSuccess('注册成功！请等待管理员审核通过后即可登录。');setTimeout(()=>{setIsLogin(true);setSuccess('');},3000);}else setError(r.message); };
 
   const inputCls = "w-full px-4 py-3 bg-white/8 border border-white/10 rounded-xl text-white placeholder-white/30 transition-all focus:outline-none focus:border-indigo-400 focus:bg-white/12 focus:ring-4 focus:ring-indigo-500/15";
   const labelCls = "block text-indigo-200/80 text-xs font-medium mb-1.5";

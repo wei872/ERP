@@ -2,14 +2,51 @@ spring:
   application.name: erp-system
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/erp_system?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai
-    username: root
-    password: wei5105173053
+    # 商用部署通过环境变量注入，切勿在代码库中保存真实凭据
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:erp_system}?useUnicode=true&characterEncoding=utf-8&useSSL=${DB_SSL:false}&serverTimezone=${DB_TZ:Asia/Shanghai}&allowPublicKeyRetrieval=true
+    username: ${DB_USER:root}
+    password: ${DB_PASSWORD:}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN:5}
+      connection-timeout: 15000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      connection-test-query: SELECT 1
   servlet:
     multipart:
       max-file-size: 5MB
       max-request-size: 10MB
-server.port: 8080
-server.address: 0.0.0.0
-jwt.secret: ${JWT_SECRET:ERP-System-2024-Prod-Change-Me-In-Real-Env-!!!}
-logging.level.com.erp: info
+  jackson:
+    time-zone: ${DB_TZ:Asia/Shanghai}
+
+server:
+  port: ${SERVER_PORT:8080}
+  address: 0.0.0.0
+  compression:
+    enabled: true
+    mime-types: application/json,application/javascript,text/css,text/plain,text/html
+    min-response-size: 2048
+
+# 运行环境：dev（默认，容忍默认密钥）/ prod（启动即校验密钥，不合规直接拒绝启动）
+app:
+  env: ${APP_ENV:dev}
+  # 是否在后端启动时自动播种演示账号（生产环境请设为 false）
+  seed-demo-users: ${SEED_DEMO_USERS:true}
+  # 生产环境首次部署可用此变量指定管理员初始密码（仅创建时生效，不会覆盖已有密码）
+  seed-admin-password: ${SEED_ADMIN_PASSWORD:}
+
+jwt:
+  secret: ${JWT_SECRET:ERP-System-2024-Prod-Change-Me-In-Real-Env-!!!}
+  # Token 有效期（毫秒），默认 24 小时
+  expiration: ${JWT_EXPIRATION:86400000}
+
+# 跨域：仅对独立部署前端的场景需要配置，逗号分隔的 Origin 白名单；
+# 默认仅放行本地开发端口。nginx 同源反代部署不依赖 CORS。
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000}
+
+logging:
+  level:
+    com.erp: ${LOG_LEVEL:info}
+# 生产环境建议输出到文件：启动时追加 --logging.file.name=logs/erp.log

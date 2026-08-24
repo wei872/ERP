@@ -1,10 +1,12 @@
 <div align="center">
 
-# ERP 企业管理系统 v5.0
+# ERP 企业管理系统 v5.1
 
 **三包单体仓库 · React 19 前端 + Spring Boot 2.7 后端 + MySQL · 60 个 REST 端点 · 13 个业务页面 · 162 张业务数据表**
 
 基于 [wei872/ERP](https://gitee.com/wei872/erp) 的开源数据模型，重构为现代化技术栈的完整 ERP 系统。
+v5.1 起完成商用加固：登录防爆破、密码强度策略、JWT 生产强校验、CORS 白名单、全局异常兜底、
+Docker Compose 一键部署、健康检查与备份方案，详见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) 与 [`CHANGELOG.md`](CHANGELOG.md)。
 
 </div>
 
@@ -39,6 +41,17 @@
 - **后端权威校验**：模块前缀级读写边界（`trade_/finance_/prod_/hr_/oa_/cust_/supp_/...`）
 - **前端按角色过滤**：8 角色看到不同业务菜单组
 
+### 🛡️ 商用安全特性（v5.1+）
+
+- **登录防爆破**：同一「用户名 + IP」连续失败 5 次锁定 15 分钟
+- **密码策略**：注册至少 8 位且含字母和数字；密码一律 BCrypt 存储，旧明文登录后自动升级
+- **JWT 生产强校验**：`APP_ENV=prod` 拒绝默认密钥启动，密钥不足 32 字节拒绝启动
+- **CORS 白名单**：仅放行 `CORS_ALLOWED_ORIGINS` 列出的 Origin，不再 `*` 全开
+- **全局异常兜底**：统一错误格式，不向前端泄露堆栈 / SQL 细节
+- **安全响应头**：nosniff / SAMEORIGIN / Referrer-Policy / API no-store
+- **审计日志**：登录与关键写操作全记录（`sys_audit` / `sys_login_log`）
+- **健康检查**：`GET /health` 供容器探活与负载均衡
+
 ## 🏗️ 技术栈
 
 | 层 | 技术 |
@@ -65,7 +78,7 @@ erp/
 │       ├── types/index.ts       ← User / Permission / UserRole
 │       └── components/          ← 13 个页面组件 + Layout
 ├── backend/                    ← Spring Boot 后端
-│   ├── Dockerfile               ← ⚠️ 先 mvn package 再 build
+│   ├── Dockerfile               ← 多阶段构建（镜像内 mvn 打包 + JRE 运行镜像）
 │   ├── pom.xml
 │   └── src/main/
 │       ├── java/com/erp/
@@ -78,11 +91,13 @@ erp/
 │       └── resources/application.yml  ← DB / JWT 配置
 ├── database/
 │   ├── init.sql                ← 78 张基础表 + 预置账号
-│   └── upgrade.sql             ← 268 张扩展业务表（CREATE TABLE IF NOT EXISTS 幂等）
-├── 财务需求/                    ← 财务模版系统设计规格
-├── docs/
-├── AGENTS.md                   ← AI 助手在本仓库工作时的注意事项
-└── opencode.json
+│   ├── upgrade.sql             ← 268 张扩展业务表（CREATE TABLE IF NOT EXISTS 幂等）
+│   ├── upgrade2.sql            ← 元数据基础表（字典/表注册，幂等）
+│   └── registry_seed.sql       ← 表注册种子数据（INSERT IGNORE 幂等）
+├── docs/                       ← 部署指南 / 功能手册 / 操作指南
+├── docker-compose.yml          ← 一键商用部署（MySQL + 后端 + 前端）
+├── .env.example                ← 部署环境变量模板
+└── CHANGELOG.md                ← 版本变更记录
 ```
 
 ## 🚀 快速启动
@@ -109,11 +124,13 @@ mysql -u root -p --default-character-set=utf8mb4 < database/upgrade.sql
 
 ```bash
 cd backend
-mvn clean package -DskipTests          # 产出 target/erp-system-5.0.0.jar
-java -jar target/erp-system-5.0.0.jar  # → http://localhost:8080/api
+mvn clean package -DskipTests           # 产出 target/erp-system-5.1.0.jar
+java -jar target/erp-system-5.1.0.jar   # → http://localhost:8080/api
 ```
 
-> DB 配置走 `application.yml`，默认连接 `localhost:3306/erp_system`。生产环境改用环境变量 `JWT_SECRET`，**切勿提交新 secret**。
+> 本地开发默认连接 `localhost:3306/erp_system`。所有连接参数均支持环境变量覆盖
+>（`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`），生产部署见
+> [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。**切勿把真实密钥提交进代码库。**
 
 ### 第 3 步：前端
 
@@ -147,16 +164,22 @@ http://localhost:3000
 | zhouba | 123456 | 采购 | 采购部 | 工作流审批 |
 
 > 注册新账号默认状态为 `pending`，需 admin 在用户管理审核通过后才能登录。
+> ⚠️ 以上除 admin 外均为**演示账号**，仅本地开发自动播种；生产部署（`SEED_DEMO_USERS=false`）不会创建。
+> 生产环境请务必：① 用 `SEED_ADMIN_PASSWORD` 设置 admin 强初始密码；② 登录后立即再次修改。
 
-## 🐳 Docker 部署
+## 🐳 Docker 部署（推荐商用方式）
 
 ```bash
-# 前端
-cd frontend && docker build -t erp-frontend .
-# 后端（⚠️ 先 mvn package 再 build，Dockerfile 不会自己打包）
-cd backend && mvn clean package -DskipTests && docker build -t erp-backend .
-# docker-compose up（如有 docker-compose.yml）
+cp .env.example .env      # 填写 MYSQL_PASSWORD / JWT_SECRET / SEED_ADMIN_PASSWORD
+docker compose up -d --build
+# → http://localhost:8081（admin + 你设置的初始密码）
 ```
+
+- 三容器（MySQL 8 / 后端 / 前端 nginx）带健康检查与数据卷持久化，首次自动初始化全部 4 个 SQL 脚本；
+- 后端镜像为多阶段构建（无需先在宿主机 `mvn package`），运行镜像 JRE + 非 root 用户；
+- 生产环境默认 `SEED_DEMO_USERS=false`，不创建演示账号。
+
+完整部署 / 升级 / 备份 / 安全检查清单见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 
 ## 📚 端点速查
 
@@ -194,9 +217,9 @@ cd backend && mvn test
 
 ## 📖 更多文档
 
-- [`AGENTS.md`](./AGENTS.md) — AI 助手在本仓库工作时的注意事项（三包结构、JWT 重复类陷阱、Vite proxy 配置等）
-- [`财务需求/`](./财务需求/) — 财务模版系统设计规格
-- [`docs/`](./docs/) — 项目文档
+- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — **商用部署指南**（Docker/手工/安全检查清单/备份恢复）
+- [`CHANGELOG.md`](./CHANGELOG.md) — 版本变更记录
+- [`docs/`](./docs/) — 功能手册与操作指南
 
 ## 📄 License
 
