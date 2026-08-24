@@ -177,24 +177,26 @@ for (let m = 8; m >= 0; m--) {
 const scrapEvent = { wo: workOrders[3]?.no || workOrders[0].no, qty: 2, reason: '焊接缺陷-返修无价值', m: 4 };
 
 // ══════════════════════ 库存模拟（加权平均成本） ══════════════════════
-const inv = {}; // code -> {qty, value}
-const moves = []; // {m, day, code, type:'入库'|'出库', delta, cost, ref, wh}
-const WH = '默认仓';
-const invIn = (m, day, code, qty, price, ref) => {
-  inv[code] = inv[code] || { qty: 0, value: 0 };
-  inv[code].qty += qty; inv[code].value += qty * price;
-  moves.push({ m, day, code, type: '入库', delta: qty, ref });
+const inv = {}; // 'code|仓库' -> {qty, value}（多仓维度）
+const moves = []; // {m, day, code, wh, type:'入库'|'出库', delta, cost, ref}
+const WH_RAW = '原料仓', WH_FG = '成品仓', WH = '默认仓';
+const invIn = (m, day, code, qty, price, ref, wh) => {
+  const k = code + '|' + wh;
+  inv[k] = inv[k] || { qty: 0, value: 0 };
+  inv[k].qty += qty; inv[k].value += qty * price;
+  moves.push({ m, day, code, wh, type: '入库', delta: qty, ref });
 };
-const invOut = (m, day, code, qty, ref) => {
-  const b = inv[code] = inv[code] || { qty: 0, value: 0 };
+const invOut = (m, day, code, qty, ref, wh) => {
+  const k = code + '|' + wh;
+  const b = inv[k] = inv[k] || { qty: 0, value: 0 };
   const uc = b.qty > 0 ? b.value / b.qty : 0;
   b.qty -= qty; b.value -= qty * uc;
   if (b.qty < 0) { b.qty = 0; b.value = 0; }
-  moves.push({ m, day, code, type: '出库', delta: qty, ref, cost: uc });
+  moves.push({ m, day, code, wh, type: '出库', delta: qty, ref, cost: uc });
 };
 // 期初建账库存（8个月前的一次性建库采购，保证早期生产领料不断料）
 const initialStock = { 'IC-0001': 400, 'MOD-0001': 200, 'PCB-0001': 350, 'PWR-0001': 300, 'ENC-0001': 250, 'DSP-0001': 120, 'CON-0001': 1200, 'PKG-0001': 500, 'FST-0001': 900, 'SEN-0001': 200, 'SEN-0002': 150, 'ISO-0001': 160 };
-for (const [c, qty] of Object.entries(initialStock)) invIn(8, 29, c, qty, gmap[c][5], '期初建库');
+for (const [c, qty] of Object.entries(initialStock)) invIn(8, 29, c, qty, gmap[c][5], '期初建库', WH_RAW);
 // ── 批次仿真：与库存回放同节奏（采购批次 → FIFO领料 → 生产批次(成分回写) → 销售FIFO耗用） ──
 const batchRows = [];   // trade_batch_trace
 const batchConsumeRows = []; // trade_batch_consume
@@ -215,7 +217,7 @@ const fifoConsume = (code, qty, targetNo, targetType, m, compSet) => {
 for (let m = 8; m >= 0; m--) {
   for (const p of purchases.filter(x => x.m === m && x.status === '已入库')) {
     p.lines.forEach((l, i) => {
-      invIn(m, p.day, l.code, l.qty, l.price, p.no);
+      invIn(m, p.day, l.code, l.qty, l.price, p.no, WH_RAW);
       const bn = `PB-${p.no}-${i + 1}`;
       liveBatches.push({ no: bn, code: l.code, type: '采购批次', qty: l.qty, remain: l.qty, source_no: p.no, supplier_code: suppliers[p.suppIdx][0], supplier_name: suppliers[p.suppIdx][1], wo: '', components: [], m, day: p.day + 2 });
     });
@@ -223,17 +225,17 @@ for (let m = 8; m >= 0; m--) {
   for (const r of requisitions.filter(x => x.m === m)) {
     woComponents[r.wo] = woComponents[r.wo] || [];
     for (const l of r.lines) if (l.actual > 0) {
-      invOut(m, 15, l.code, l.actual, r.no);
+      invOut(m, 15, l.code, l.actual, r.no, WH_RAW);
       fifoConsume(l.code, l.actual, r.wo, '生产领料', m, woComponents[r.wo]);
     }
   }
   for (const w of warehouseIns.filter(x => x.m === m)) {
-    invIn(m, w.day, w.fg, w.qty, fgCost[w.fg], w.no);
+    invIn(m, w.day, w.fg, w.qty, fgCost[w.fg], w.no, WH_FG);
     liveBatches.push({ no: `MB-${w.wo}`, code: w.fg, type: '生产批次', qty: w.qty, remain: w.qty, source_no: w.wo, supplier_code: '', supplier_name: '', wo: w.wo, components: woComponents[w.wo] || [], m, day: w.day });
   }
   for (const s of sales.filter(x => x.m === m && x.ship === '已出库'))
     for (const l of s.lines) {
-      invOut(m, s.day, l.code, l.qty, s.no);
+      invOut(m, s.day, l.code, l.qty, s.no, WH_FG);
       fifoConsume(l.code, l.qty, s.no, '销售出库', m, null);
     }
 }
@@ -409,7 +411,7 @@ insert('prod_bom_structure', ['parent_code', 'component_code', 'product_code', '
 insert('trade_sales_main', ['sales_no', 'customer_code', 'customer_name', 'sales_date', 'total_amount', 'sales_person', 'sales_status', 'shipping_status', 'warehouse', 'remark'],
   sales.map(s => {
     const total = s.lines.reduce((t, l) => t + l.qty * l.price, 0);
-    return [q(s.no), q(customers[s.custIdx][0]), q(customers[s.custIdx][1]), dAgo(s.m * 30 + s.day), money(total), q(s.person), q(s.status), q(s.ship), q(WH), q('')];
+    return [q(s.no), q(customers[s.custIdx][0]), q(customers[s.custIdx][1]), dAgo(s.m * 30 + s.day), money(total), q(s.person), q(s.status), q(s.ship), q(WH_FG), q('')];
   }));
 insert('trade_sales_detail', ['sales_no', 'line_no', 'product_code', 'product_name', 'spec_model', 'qty', 'unit', 'unit_price', 'amount', 'delivery_date'],
   sales.flatMap(s => s.lines.map((l, i) => [q(s.no), i + 1, q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.qty), q(gmap[l.code][4]), money(l.price), money(l.qty * l.price), dAgo(Math.max(0, s.m * 30 + s.day - 2))])));
@@ -418,7 +420,7 @@ insert('trade_sales_detail', ['sales_no', 'line_no', 'product_code', 'product_na
 insert('trade_purchase_main', ['purchase_no', 'supplier_code', 'supplier_name', 'purchase_date', 'total_amount', 'buyer', 'purchase_status', 'arrival_status', 'warehouse', 'remark'],
   purchases.map(p => {
     const total = p.lines.reduce((t, l) => t + l.qty * l.price, 0);
-    return [q(p.no), q(suppliers[p.suppIdx][0]), q(suppliers[p.suppIdx][1]), dAgo(p.m * 30 + p.day), money(total), q(p.buyer), q(p.status), q(p.arrival), q(WH), q('')];
+    return [q(p.no), q(suppliers[p.suppIdx][0]), q(suppliers[p.suppIdx][1]), dAgo(p.m * 30 + p.day), money(total), q(p.buyer), q(p.status), q(p.arrival), q(WH_RAW), q('')];
   }));
 insert('trade_purchase_detail', ['purchase_no', 'line_no', 'product_code', 'product_name', 'spec_model', 'qty', 'unit', 'unit_price', 'amount', 'recv_qty'],
   purchases.flatMap(p => p.lines.map((l, i) => [q(p.no), i + 1, q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.qty), q(gmap[l.code][4]), money(l.price), money(l.qty * l.price), p.status === '已入库' ? q4(l.qty) : q4(0)])));
@@ -428,12 +430,12 @@ const inDocs = [], inDetails = [], outDocs = [], outDetails = [];
 for (const p of purchases.filter(x => x.status === '已入库')) {
   const total = p.lines.reduce((t, l) => t + l.qty * l.price, 0);
   const inNo = `IN-${p.no}`;
-  inDocs.push([q(inNo), q('采购入库'), q(p.no), q(suppliers[p.suppIdx][0]), q(WH), money(total), q('李四'), dAgo(p.m * 30 + p.day + 2), q('已入库')]);
+  inDocs.push([q(inNo), q('采购入库'), q(p.no), q(suppliers[p.suppIdx][0]), q(WH_RAW), money(total), q('李四'), dAgo(p.m * 30 + p.day + 2), q('已入库')]);
   p.lines.forEach((l, i) => inDetails.push([q(inNo), i + 1, q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.qty), q(gmap[l.code][4]), money(l.price), money(l.qty * l.price), q('A-01')]));
 }
 for (const w of warehouseIns) {
   const inNo = `IN-${w.no}`;
-  inDocs.push([q(inNo), q('生产入库'), q(w.wo), q(''), q(WH), money(w.qty * fgCost[w.fg]), q('李四'), dAgo(w.m * 30 + w.day), q('已入库')]);
+  inDocs.push([q(inNo), q('生产入库'), q(w.wo), q(''), q(WH_FG), money(w.qty * fgCost[w.fg]), q('李四'), dAgo(w.m * 30 + w.day), q('已入库')]);
   inDetails.push([q(inNo), 1, q(w.fg), q(gmap[w.fg][1]), q(gmap[w.fg][3]), q4(w.qty), q(gmap[w.fg][4]), money(fgCost[w.fg]), money(w.qty * fgCost[w.fg]), q('B-01')]);
 }
 insert('trade_stock_in_main', ['in_no', 'in_type', 'ref_no', 'supplier_code', 'warehouse', 'total_amount', 'handler', 'in_date', 'status'], inDocs);
@@ -441,7 +443,7 @@ insert('trade_stock_in_detail', ['in_no', 'line_no', 'product_code', 'product_na
 for (const s of sales.filter(x => x.ship === '已出库')) {
   const total = s.lines.reduce((t, l) => t + l.qty * l.price, 0);
   const outNo = `OUT-${s.no}`;
-  outDocs.push([q(outNo), q('销售出库'), q(s.no), q(customers[s.custIdx][0]), q(WH), money(total), q('李四'), dAgo(s.m * 30 + s.day), q('已出库')]);
+  outDocs.push([q(outNo), q('销售出库'), q(s.no), q(customers[s.custIdx][0]), q(WH_FG), money(total), q('李四'), dAgo(s.m * 30 + s.day), q('已出库')]);
   s.lines.forEach((l, i) => {
     const uc = fgCost[l.code];
     outDetails.push([q(outNo), i + 1, q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.qty), q(gmap[l.code][4]), money(uc), money(l.qty * uc), q('B-01')]);
@@ -453,23 +455,32 @@ insert('trade_stock_out_detail', ['out_no', 'line_no', 'product_code', 'product_
 // ── 库存结存 + 流水 ──
 const alertSet = new Set(['PKG-0001', 'FST-0001']);
 insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model', 'warehouse', 'location', 'qty', 'unit_cost', 'total_value', 'min_stock', 'stock_status'],
-  Object.entries(inv).filter(([, b]) => b.qty > 0).map(([code, b]) => {
+  Object.entries(inv).filter(([, b]) => b.qty > 0).map(([key, b]) => {
+    const [code, wh] = key.split('|');
     const uc = b.value / b.qty;
     const min = alertSet.has(code) ? Math.ceil(b.qty + 25) : (code.startsWith('FG') ? 15 : 40);
-    return [q(code), q(gmap[code][1]), q(gmap[code][3]), q(WH), q(code.startsWith('FG') ? 'B-01' : 'A-01'), q4(b.qty), q4(uc), money(b.value), q4(min), q(b.qty < min ? '预警' : '正常')];
+    return [q(code), q(gmap[code][1]), q(gmap[code][3]), q(wh), q(code.startsWith('FG') ? 'B-01' : 'A-01'), q4(b.qty), q4(uc), money(b.value), q4(min), q(b.qty < min ? '预警' : '正常')];
   }));
 {
   let logSeq = 0;
   const running = {};
   const logRows = moves.map(mv => {
-    running[mv.code] = running[mv.code] || 0;
-    const before = running[mv.code];
+    const rk = mv.code + '|' + mv.wh;
+    running[rk] = running[rk] || 0;
+    const before = running[rk];
     const after = mv.type === '入库' ? before + mv.delta : before - mv.delta;
-    running[mv.code] = after;
-    return [q(`LOG-D-${pad(++logSeq, 5)}`), q(mv.code), q(gmap[mv.code][1]), q(WH), q(mv.type), q4(before), q4(mv.delta), q4(after), q(mv.ref), q('系统'), dAgo(mv.m * 30 + mv.day)];
+    running[rk] = after;
+    return [q(`LOG-D-${pad(++logSeq, 5)}`), q(mv.code), q(gmap[mv.code][1]), q(mv.wh), q(mv.type), q4(before), q4(mv.delta), q4(after), q(mv.ref), q('系统'), dAgo(mv.m * 30 + mv.day)];
   });
   insert('trade_stock_log', ['log_no', 'product_code', 'product_name', 'warehouse', 'change_type', 'before_qty', 'change_qty', 'after_qty', 'ref_no', 'operator', 'change_date'], logRows);
 }
+
+// ── 仓库主数据（多仓库管理） ──
+insert('trade_warehouse_main', ['warehouse_code', 'warehouse_name', 'warehouse_type', 'manager', 'location', 'status', 'remark'], [
+  [q('WH-01'), q(WH_RAW), q('原料仓'), q('李四'), q('A区-1层'), q('启用'), q('原材料/元器件存储，采购入库与生产领料')],
+  [q('WH-02'), q(WH_FG), q('成品仓'), q('李四'), q('B区-1层'), q('启用'), q('产成品存储，生产入库与销售发货')],
+  [q('WH-03'), q(WH), q('综合仓'), q('李四'), q('C区-1层'), q('启用'), q('盘点调账与杂项周转')],
+]);
 
 // ── 批次追溯台账 + 耗用记录（与出入库回放完全同步生成） ──
 insert('trade_batch_trace', ['batch_no', 'product_code', 'product_name', 'batch_type', 'qty', 'remain_qty', 'source_no', 'supplier_code', 'supplier_name', 'work_order_no', 'component_batches', 'in_date', 'status'],
@@ -481,9 +492,9 @@ insert('trade_batch_consume', ['batch_no', 'product_code', 'consume_qty', 'targe
 insert('prod_work_order', ['work_order_no', 'ref_plan_no', 'product_code', 'product_name', 'spec_model', 'plan_qty', 'actual_qty', 'complete_qty', 'scrap_qty', 'unit', 'workshop', 'leader', 'start_date', 'plan_end_date', 'order_status', 'priority'],
   workOrders.map(w => [q(w.no), q(''), q(w.fg), q(gmap[w.fg][1]), q(gmap[w.fg][3]), q4(w.qty), q4(w.actual), q4(w.actual), w.no === scrapEvent.wo ? q4(scrapEvent.qty) : q4(0), q('台'), q(pick(workshops)), q('赵六'), dAgo(w.m * 30 + w.day), dAgo(Math.max(0, w.m * 30 + w.day - 7)), q(w.status), q('中')]));
 insert('prod_material_requisition', ['req_no', 'ref_work_order', 'product_code', 'product_name', 'spec_model', 'plan_req_qty', 'actual_req_qty', 'unit', 'warehouse', 'req_date', 'req_person'],
-  requisitions.flatMap(r => r.lines.map(l => [q(r.no), q(r.wo), q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.plan), q4(l.actual), q(gmap[l.code][4]), q(WH), dAgo(r.m * 30 + 14), q('赵六')])));
+  requisitions.flatMap(r => r.lines.map(l => [q(r.no), q(r.wo), q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.plan), q4(l.actual), q(gmap[l.code][4]), q(WH_RAW), dAgo(r.m * 30 + 14), q('赵六')])));
 insert('prod_warehousing', ['in_no', 'ref_work_order', 'product_code', 'product_name', 'spec_model', 'plan_in_qty', 'actual_in_qty', 'unit', 'warehouse', 'in_date', 'qc_result', 'handler'],
-  warehouseIns.map(w => [q(w.no), q(w.wo), q(w.fg), q(gmap[w.fg][1]), q(gmap[w.fg][3]), q4(w.qty), q4(w.qty), q(gmap[w.fg][4]), q(WH), dAgo(w.m * 30 + w.day), q('合格'), q('李四')]));
+  warehouseIns.map(w => [q(w.no), q(w.wo), q(w.fg), q(gmap[w.fg][1]), q(gmap[w.fg][3]), q4(w.qty), q4(w.qty), q(gmap[w.fg][4]), q(WH_FG), dAgo(w.m * 30 + w.day), q('合格'), q('李四')]));
 insert('prod_scrap_main', ['scrap_no', 'work_order_no', 'product_code', 'product_name', 'scrap_qty', 'scrap_reason', 'handler', 'scrap_date', 'status'],
   [[q('SCP-D-0001'), q(scrapEvent.wo), q(workOrders.find(w => w.no === scrapEvent.wo).fg), q(gmap[workOrders.find(w => w.no === scrapEvent.wo).fg][1]), q4(scrapEvent.qty), q(scrapEvent.reason), q('赵六'), dAgo(scrapEvent.m * 30 + 16), q('已确认')]]);
 insert('prod_cost_settle', ['settle_no', 'work_order_no', 'product_code', 'product_name', 'spec_model', 'produce_qty', 'material_cost', 'labor_cost', 'total_cost', 'unit_cost', 'settle_date', 'handler'],
@@ -572,7 +583,7 @@ insert('hr_salary_main', ['salary_no', 'emp_no', 'emp_name', 'department', 'base
 insert('quality_inspection_main', ['inspection_no', 'inspection_type', 'product_code', 'product_name', 'batch_no', 'sample_qty', 'pass_qty', 'fail_qty', 'result', 'inspector', 'inspection_date', 'status'],
   qcs.map((c, i) => [q(`QC-${pad(i + 1, 4)}`), q(c.type), q(c.code), q(gmap[c.code][1]), q(`B${pad(i + 1, 5)}`), c.sample, c.pass, c.sample - c.pass, q(c.result), q(c.inspector), dAgo(c.m * 30 + c.day), q('已完成')]));
 insert('trade_delivery_main', ['delivery_no', 'ref_sales_no', 'customer_code', 'customer_name', 'delivery_date', 'warehouse', 'logistics', 'tracking_no', 'handler', 'status'],
-  deliveries.map(d => [q(d.no), q(d.sale.no), q(customers[d.sale.custIdx][0]), q(customers[d.sale.custIdx][1]), dAgo(d.m * 30 + d.day), q(WH), q(d.logistics), q(d.track), q('李四'), q(d.status)]));
+  deliveries.map(d => [q(d.no), q(d.sale.no), q(customers[d.sale.custIdx][0]), q(customers[d.sale.custIdx][1]), dAgo(d.m * 30 + d.day), q(WH_FG), q(d.logistics), q(d.track), q('李四'), q(d.status)]));
 
 // ── 审批流 ──
 const apMainRows = [], apInstRows = [], apTaskRows = [], apLogRows = [];

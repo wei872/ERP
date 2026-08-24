@@ -59,6 +59,7 @@ export const bizApi = {
   stockOut: (body: Record<string, unknown>) => request('/biz/stock-out', { method: 'POST', body: JSON.stringify(body) }),
   stockInFromPurchase: (id: number) => request(`/biz/stock-in-from-purchase/${id}`, { method: 'POST' }),
   stockOutFromSale: (id: number) => request(`/biz/stock-out-from-sale/${id}`, { method: 'POST' }),
+  transfer: (body: { product_code: string; from_warehouse: string; to_warehouse: string; qty: number; reason?: string }) => request<any>('/biz/transfer', { method: 'POST', body: JSON.stringify(body) }),
   batchTrace: (batchNo: string) => request<any>(`/biz/batch-trace/${encodeURIComponent(batchNo)}`),
   batchTraceSale: (salesNo: string) => request<any>(`/biz/batch-trace-sale/${encodeURIComponent(salesNo)}`),
   codeRules: () => request<any[]>('/biz/code-rules'),

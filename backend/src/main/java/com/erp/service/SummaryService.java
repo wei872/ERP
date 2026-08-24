@@ -53,6 +53,7 @@ public class SummaryService {
         CONFIGS.put("oa_approval_main",        new Cfg(new String[][]{{"amount","申请金额合计"}}, "submit_date", "approval_status"));
         CONFIGS.put("prod_material_requisition", new Cfg(new String[][]{{"plan_req_qty","计划领料量"},{"actual_req_qty","实际领料量"}}, "req_date", null));
         CONFIGS.put("trade_goods_main",        new Cfg(null, null, "category"));
+        CONFIGS.put("trade_warehouse_main",    new Cfg(null, null, "warehouse_type"));
         CONFIGS.put("sys_log_operation",       new Cfg(null, "created_at", "module")
             .extra("DATE(created_at)=CURDATE()", "今日操作数"));
         CONFIGS.put("sys_login_log",           new Cfg(null, "login_time", "login_status")

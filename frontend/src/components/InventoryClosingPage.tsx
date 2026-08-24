@@ -50,6 +50,42 @@ export default function InventoryClosingPage() {
   const [qty, setQty] = useState(10);
   const [unitCost, setUnitCost] = useState(94.00);
 
+  // 多仓库：仓库主数据 + 库存按仓筛选
+  const [warehouses, setWarehouses] = useState<string[]>([]);
+  const [whFilter, setWhFilter] = useState('');
+  // 仓间调拨表单
+  const [tfCode, setTfCode] = useState('');
+  const [tfFrom, setTfFrom] = useState('');
+  const [tfTo, setTfTo] = useState('');
+  const [tfQty, setTfQty] = useState(0);
+  const [tfReason, setTfReason] = useState('');
+
+  useEffect(() => {
+    // 仓库列表：优先仓库主数据表，兜底默认仓（未执行 upgrade3 的环境）
+    dataApi.list('trade_warehouse_main', 1, 50, '')
+      .then(r => {
+        const names = (r.data?.rows || []).filter((x: any) => x.status !== '停用').map((x: any) => String(x.warehouse_name));
+        setWarehouses(names.length ? names : ['默认仓']);
+        if (!tfFrom) setTfFrom(names[0] || '默认仓');
+        if (!tfTo) setTfTo(names[1] || '默认仓');
+      })
+      .catch(() => { setWarehouses(['默认仓']); setTfFrom('默认仓'); setTfTo('默认仓'); });
+  }, []);
+
+  const doTransfer = async () => {
+    if (!tfCode.trim()) { toastNotify('请填写商品编码', 'warn'); return; }
+    if (!tfFrom || !tfTo || tfFrom === tfTo) { toastNotify('请选择不同的源仓库/目标仓库', 'warn'); return; }
+    if (!(tfQty > 0)) { toastNotify('调拨数量必须大于 0', 'warn'); return; }
+    setSaving(true);
+    try {
+      const r = await bizApi.transfer({ product_code: tfCode.trim(), from_warehouse: tfFrom, to_warehouse: tfTo, qty: tfQty, reason: tfReason });
+      toastNotify(`调拨成功：${tfCode} × ${tfQty} 由 ${tfFrom} → ${tfTo}（${r.data.ref_no}）`);
+      setTfQty(0); setTfReason('');
+      loadPanoramicData();
+    } catch (e: any) { toastNotify('调拨失败：' + (e.message || '')); }
+    setSaving(false);
+  };
+
   // 进销存全景数据
   const [inventoryList, setInventoryList] = useState<any[]>([]);
   const [stockLogs, setStockLogList] = useState<any[]>([]);
@@ -204,11 +240,42 @@ export default function InventoryClosingPage() {
             </div>
           </div>
 
+          {/* 仓间调拨 */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200/80 max-w-2xl">
+            <h3 className="font-bold text-slate-800 text-base mb-4 flex items-center gap-2">
+              <span>🔀</span>
+              <span>仓间调拨（成本随数量移动加权，双向行锁防超转）</span>
+            </h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2"><label className="text-xs font-medium text-slate-500">商品编码 *</label><input value={tfCode} onChange={e=>setTfCode(e.target.value)} placeholder="例如: FG-001 / IC-0001" className="input"/></div>
+              <div><label className="text-xs font-medium text-slate-500">源仓库 *</label>
+                <select value={tfFrom} onChange={e=>setTfFrom(e.target.value)} className="input">{warehouses.map(w => <option key={w} value={w}>{w}</option>)}</select>
+              </div>
+              <div><label className="text-xs font-medium text-slate-500">目标仓库 *</label>
+                <select value={tfTo} onChange={e=>setTfTo(e.target.value)} className="input">{warehouses.map(w => <option key={w} value={w}>{w}</option>)}</select>
+              </div>
+              <div><label className="text-xs font-medium text-slate-500">调拨数量 *</label><input type="number" value={tfQty} onChange={e=>setTfQty(Number(e.target.value)||0)} className="input font-mono"/></div>
+              <div><label className="text-xs font-medium text-slate-500">调拨事由</label><input value={tfReason} onChange={e=>setTfReason(e.target.value)} placeholder="选填，记入库存流水" className="input"/></div>
+            </div>
+            <div className="mt-4 flex items-center justify-between">
+              <p className="text-[11px] text-slate-400">调拨生成「调拨出/调拨入」两条库存流水，可在库存变动日志中追溯</p>
+              <button onClick={doTransfer} disabled={saving} className="px-6 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl text-sm font-semibold shadow-md disabled:opacity-50">
+                {saving ? '处理中...' : `确认调拨 ${tfQty || 0} 件：${tfFrom || '?'} → ${tfTo || '?'}`}
+              </button>
+            </div>
+          </div>
+
           {/* 实时库存余额与预警线看板 */}
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80 space-y-3">
             <h4 className="font-bold text-slate-800 text-sm flex items-center justify-between">
               <span className="flex items-center gap-2">📦 当前库存余额与最低预警线监控 (`trade_inventory_balance`)</span>
-              <span className="text-xs text-slate-400 font-normal">共 {inventoryList.length} 项商品存货</span>
+              <span className="flex items-center gap-2">
+                <select value={whFilter} onChange={e => setWhFilter(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white outline-none focus:border-indigo-400">
+                  <option value="">全部仓库</option>
+                  {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+                </select>
+                <span className="text-xs text-slate-400 font-normal">共 {inventoryList.filter(r => !whFilter || String(r.warehouse) === whFilter).length} 项存货</span>
+              </span>
             </h4>
             <div className="overflow-x-auto">
               <table className="erp-table text-xs">
@@ -225,10 +292,10 @@ export default function InventoryClosingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {inventoryList.length === 0 ? (
+                  {inventoryList.filter(r => !whFilter || String(r.warehouse) === whFilter).length === 0 ? (
                     <tr><td colSpan={8} className="text-center py-6 text-slate-400">暂无库存数据</td></tr>
                   ) : (
-                    inventoryList.slice(0, 8).map((inv) => {
+                    inventoryList.filter(r => !whFilter || String(r.warehouse) === whFilter).slice(0, 8).map((inv) => {
                       const curQ = Number(inv.qty) || 0;
                       const minQ = Number(inv.min_stock) || 10;
                       const isAlert = curQ <= minQ;

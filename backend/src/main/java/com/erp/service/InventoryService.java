@@ -143,6 +143,67 @@ public class InventoryService {
             curQty, outQty, newQty, refNo, "系统");
     }
 
+    /** 仓间调拨：同一事务内源仓转出 + 目标仓转入，双向行锁防并发超转，成本随数量移动加权 */
+    @Transactional
+    public Map<String,Object> transfer(String productCode, String fromWh, String toWh, BigDecimal qty, String reason) {
+        if (productCode == null || productCode.trim().isEmpty()) throw new RuntimeException("商品编码不能为空");
+        if (qty == null || qty.compareTo(BigDecimal.ZERO) <= 0) throw new RuntimeException("调拨数量必须大于 0");
+        if (fromWh == null || toWh == null || fromWh.trim().isEmpty() || toWh.trim().isEmpty()) throw new RuntimeException("源仓库/目标仓库不能为空");
+        if (fromWh.trim().equals(toWh.trim())) throw new RuntimeException("源仓库与目标仓库不能相同");
+        String fWh = fromWh.trim(), tWh = toWh.trim();
+        String refNo = "TRANS-" + System.currentTimeMillis();
+
+        // ── 转出：行锁 + 足额校验 + 按比例结转成本 ──
+        List<Map<String,Object>> rows = db.queryForList(
+            "SELECT qty,total_value,product_name FROM trade_inventory_balance WHERE product_code=? AND warehouse=? FOR UPDATE",
+            productCode, fWh);
+        if (rows.isEmpty()) throw new RuntimeException("源仓库无该商品库存: " + productCode + " @" + fWh);
+        BigDecimal curQty = new BigDecimal(rows.get(0).get("qty").toString());
+        BigDecimal curValue = new BigDecimal(rows.get(0).get("total_value").toString());
+        String pName = String.valueOf(rows.get(0).getOrDefault("product_name", productCode));
+        if (curQty.compareTo(qty) < 0) throw new RuntimeException("源仓库库存不足: 现有 " + curQty + "，调拨 " + qty);
+        BigDecimal newQty = curQty.subtract(qty);
+        BigDecimal ratio = curQty.signum() > 0 ? newQty.divide(curQty, 8, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        BigDecimal newValue = curValue.multiply(ratio).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal moveValue = curValue.subtract(newValue);
+        BigDecimal moveCost = qty.signum() > 0 ? moveValue.divide(qty, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        BigDecimal newCost = newQty.signum() > 0 ? newValue.divide(newQty, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+        db.update("UPDATE trade_inventory_balance SET qty=?, unit_cost=?, total_value=? WHERE product_code=? AND warehouse=?",
+            newQty, newCost, newValue, productCode, fWh);
+        db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,before_qty,change_qty,after_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'调拨出',?,?,?,?,?,CURDATE())",
+            refNo + "-O", productCode, pName, fWh, curQty, qty, newQty, refNo, (reason == null || reason.isEmpty()) ? "系统" : reason);
+
+        // ── 转入：目标仓加权平均并入 ──
+        List<Map<String,Object>> toRows = db.queryForList(
+            "SELECT qty,total_value FROM trade_inventory_balance WHERE product_code=? AND warehouse=? FOR UPDATE",
+            productCode, tWh);
+        BigDecimal beforeQty;
+        if (toRows.isEmpty()) {
+            beforeQty = BigDecimal.ZERO;
+            db.update("INSERT INTO trade_inventory_balance(product_code,product_name,spec_model,warehouse,location,qty,unit_cost,total_value,min_stock,stock_status) VALUES(?,?,?,?,'',?,?,?,10,'正常')",
+                productCode, pName, "", tWh, qty, moveCost, moveValue);
+        } else {
+            beforeQty = new BigDecimal(toRows.get(0).get("qty").toString());
+            BigDecimal tValue = new BigDecimal(toRows.get(0).get("total_value").toString());
+            BigDecimal nQty = beforeQty.add(qty);
+            BigDecimal nValue = tValue.add(moveValue);
+            BigDecimal nCost = nQty.signum() > 0 ? nValue.divide(nQty, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+            db.update("UPDATE trade_inventory_balance SET qty=?, unit_cost=?, total_value=? WHERE product_code=? AND warehouse=?",
+                nQty, nCost, nValue, productCode, tWh);
+        }
+        db.update("INSERT INTO trade_stock_log(log_no,product_code,product_name,warehouse,change_type,before_qty,change_qty,after_qty,ref_no,operator,change_date) VALUES(?,?,?,?,'调拨入',?,?,?,?,?,CURDATE())",
+            refNo + "-I", productCode, pName, tWh, beforeQty, qty, beforeQty.add(qty), refNo, (reason == null || reason.isEmpty()) ? "系统" : reason);
+
+        Map<String,Object> res = new HashMap<>();
+        res.put("ref_no", refNo);
+        res.put("product_code", productCode);
+        res.put("qty", qty);
+        res.put("from", fWh);
+        res.put("to", tWh);
+        res.put("move_value", moveValue);
+        return res;
+    }
+
     /** 采购单 -> 一键生成入库单 + 自动增加库存 + 同步采购单与物料到货状态 */
     @Transactional
     public Map<String,Object> stockInFromPurchase(Long purchaseId, String operator) {

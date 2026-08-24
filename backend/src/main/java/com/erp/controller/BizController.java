@@ -394,6 +394,21 @@ public class BizController {
         return m;
     }
 
+    // ── 仓间调拨（多仓库管理） ──
+    @PostMapping("/transfer") public Result transfer(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
+        try {
+            Map<String,Object> r = inventory.transfer(
+                String.valueOf(body.get("product_code")),
+                String.valueOf(body.getOrDefault("from_warehouse", "")),
+                String.valueOf(body.getOrDefault("to_warehouse", "")),
+                new java.math.BigDecimal(body.getOrDefault("qty", "0").toString()),
+                String.valueOf(body.getOrDefault("reason", "")));
+            audit.log(user(req), "库存", "仓间调拨", body.get("product_code") + " " + body.get("from_warehouse") + "→" + body.get("to_warehouse") + " qty=" + body.get("qty"), audit.getIp(req));
+            return Result.ok(r);
+        } catch (Exception e) { return Result.error("调拨失败: " + e.getMessage()); }
+    }
+
     // ── 批次追溯：正向基因图谱 / 反向按销售单追溯 ──
     @GetMapping("/batch-trace/{batchNo}") public Result batchTrace(@PathVariable String batchNo) {
         try { return Result.ok(batchService.trace(batchNo)); }

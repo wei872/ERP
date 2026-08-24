@@ -90,6 +90,25 @@ INSERT IGNORE INTO sys_code_rule(rule_code, rule_name, prefix, category, seq_len
 ('PKG', '包装辅料类',   'PKG-', '包装辅料', 4, '包装箱/标签：PKG-0001 防震包装箱'),
 ('FST', '紧固件类',     'FST-', '紧固件',   4, '螺丝/螺母/垫片：FST-0001 不锈钢螺丝包');
 
+-- ── 多仓库管理：仓库主数据 ──
+CREATE TABLE IF NOT EXISTS trade_warehouse_main (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  warehouse_code VARCHAR(50) COMMENT '仓库编码',
+  warehouse_name VARCHAR(100) COMMENT '仓库名称',
+  warehouse_type VARCHAR(30) COMMENT '原料仓/成品仓/综合仓',
+  manager VARCHAR(50) COMMENT '仓管员',
+  location VARCHAR(200) COMMENT '库区位置',
+  status VARCHAR(20) DEFAULT '启用',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('trade_warehouse_main','仓库主数据','进销存管理','仓储设置',903);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('trade_warehouse_main','status','common.enable');
+
 -- 批次/编码规则表注册进通用菜单与字典
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('trade_batch_trace','批次追溯台账','进销存管理','批次追溯',901),
