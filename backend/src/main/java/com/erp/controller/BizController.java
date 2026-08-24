@@ -394,6 +394,16 @@ public class BizController {
         return m;
     }
 
+    // ── 销售毛利分析 + 安全库存补货建议 ──
+    @GetMapping("/profit-analysis") public Result profitAnalysis() {
+        try { return Result.ok(report.profitAnalysis()); }
+        catch (Exception e) { return Result.error("毛利分析加载失败: " + e.getMessage()); }
+    }
+    @GetMapping("/replenish") public Result replenish() {
+        try { return Result.ok(report.replenishSuggestions()); }
+        catch (Exception e) { return Result.error("补货建议加载失败: " + e.getMessage()); }
+    }
+
     // ── 仓间调拨（多仓库管理） ──
     @PostMapping("/transfer") public Result transfer(@RequestBody Map<String,Object> body, HttpServletRequest req) {
         if (!"admin".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");

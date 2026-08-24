@@ -19,6 +19,7 @@ const InventoryClosingPage = lazy(() => import('./InventoryClosingPage'));
 const RbacPage = lazy(() => import('./RbacPage'));
 const ReconciliationPage = lazy(() => import('./ReconciliationPage'));
 const AuditLogPage = lazy(() => import('./AuditLogPage'));
+const ProfitPage = lazy(() => import('./ProfitPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -28,13 +29,14 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'workflow',       label: '工作流审批',   icon: '🔁', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'voucher',        label: '会计凭证',     icon: '📒', roles: ['admin','accounting'] },
   { type: 'statements',     label: '三大财务报表', icon: '📊', roles: ['admin','accounting'] },
   { type: 'reconciliation', label: '应收应付核销', icon: '💸', roles: ['admin','accounting'] },
+  { type: 'profit',         label: '毛利分析',     icon: '💹', roles: ['admin','accounting','sales'] },
   { type: 'production',     label: '生产管理',     icon: '🏗️', roles: ['admin','production','warehouse'] },
   { type: 'mrp',            label: 'MRP运算',      icon: '🧮', roles: ['admin','production'] },
   { type: 'ops',            label: '库存直调&期末', icon: '🛠️', roles: ['admin','warehouse','accounting'] },
@@ -77,6 +79,7 @@ export default function Layout() {
     { label: '库存直调&期末', icon: '🛠️', page: { type: 'ops' } },
     { label: '财务模版库', icon: '💰', page: { type: 'finance' } },
     { label: '审计日志', icon: '🕵️', page: { type: 'audit' } },
+    { label: '毛利分析', icon: '💹', page: { type: 'profit' } },
   ];
   const gResults = useMemo(() => {
     const q = gq.trim().toLowerCase();
@@ -162,6 +165,7 @@ export default function Layout() {
     if (page.type === 'ops') return '🛠️ 库存直调 & 期末结账';
     if (page.type === 'reconciliation') return '💸 应收应付核销';
     if (page.type === 'audit') return '🕵️ 审计日志';
+    if (page.type === 'profit') return '💹 销售毛利分析';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -335,6 +339,7 @@ export default function Layout() {
         {page.type === 'ops' && <InventoryClosingPage />}
         {page.type === 'reconciliation' && <ReconciliationPage />}
         {page.type === 'audit' && <AuditLogPage />}
+        {page.type === 'profit' && <ProfitPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
         </Suspense>

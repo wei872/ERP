@@ -209,6 +209,159 @@ public class ReportService {
         ret.put("outflow_items", db.queryForList("SELECT expense_type name, COALESCE(SUM(amount),0) value FROM finance_expense_main WHERE DATE_FORMAT(expense_date,'%Y-%m')=? GROUP BY expense_type", period));
         return ret;
     }
+    /** 销售毛利分析：已出库销售的收入/成本/毛利，按产品/客户/月度聚合 */
+    public Map<String,Object> profitAnalysis() {
+        Map<String,Object> ret = new LinkedHashMap<>();
+        List<Map<String,Object>> sales = db.queryForList(
+            "SELECT sales_no, customer_code, customer_name, total_amount, sales_date FROM trade_sales_main WHERE shipping_status='已出库'");
+        Map<String, BigDecimal> costBySale = new LinkedHashMap<>();
+        for (Map<String,Object> r : db.queryForList(
+                "SELECT ref_no, COALESCE(SUM(qty * unit_cost),0) cost FROM trade_stock_out_detail GROUP BY ref_no")) {
+            costBySale.put(String.valueOf(r.get("ref_no")), toBd(r.get("cost")));
+        }
+
+        BigDecimal totRevenue = BigDecimal.ZERO, totCost = BigDecimal.ZERO;
+        Map<String, Map<String,Object>> byCustomer = new LinkedHashMap<>();
+        Map<String, BigDecimal> monthRevenue = new LinkedHashMap<>();
+        Map<String, BigDecimal> monthCost = new LinkedHashMap<>();
+        java.text.SimpleDateFormat monthFmt = new java.text.SimpleDateFormat("yyyy-MM");
+        for (Map<String,Object> s : sales) {
+            BigDecimal revenue = toBd(s.get("total_amount"));
+            BigDecimal cost = costBySale.getOrDefault(String.valueOf(s.get("sales_no")), BigDecimal.ZERO);
+            totRevenue = totRevenue.add(revenue);
+            totCost = totCost.add(cost);
+            String cKey = String.valueOf(s.getOrDefault("customer_code", ""));
+            Map<String,Object> c = byCustomer.get(cKey);
+            if (c == null) {
+                c = new LinkedHashMap<>();
+                c.put("customer_code", cKey);
+                c.put("customer_name", s.get("customer_name"));
+                c.put("revenue", BigDecimal.ZERO);
+                c.put("cost", BigDecimal.ZERO);
+                byCustomer.put(cKey, c);
+            }
+            c.put("revenue", ((BigDecimal)c.get("revenue")).add(revenue));
+            c.put("cost", ((BigDecimal)c.get("cost")).add(cost));
+            String month = s.get("sales_date") == null ? "" : monthFmt.format(s.get("sales_date"));
+            if (!month.isEmpty()) {
+                monthRevenue.merge(month, revenue, BigDecimal::add);
+                monthCost.merge(month, cost, BigDecimal::add);
+            }
+        }
+
+        // 产品维度：收入来自已出库销售明细，成本来自销售出库明细（出库时点成本）
+        List<Map<String,Object>> byProduct = new ArrayList<>();
+        Map<String, Map<String,Object>> prodMap = new LinkedHashMap<>();
+        for (Map<String,Object> r : db.queryForList(
+                "SELECT d.product_code, d.product_name, COALESCE(SUM(d.amount),0) revenue FROM trade_sales_detail d " +
+                "JOIN trade_sales_main m ON m.sales_no=d.sales_no WHERE m.shipping_status='已出库' " +
+                "GROUP BY d.product_code, d.product_name")) {
+            Map<String,Object> p = new LinkedHashMap<>();
+            p.put("product_code", r.get("product_code"));
+            p.put("product_name", r.get("product_name"));
+            p.put("revenue", toBd(r.get("revenue")));
+            p.put("cost", BigDecimal.ZERO);
+            prodMap.put(String.valueOf(r.get("product_code")), p);
+        }
+        for (Map<String,Object> r : db.queryForList(
+                "SELECT d.product_code, COALESCE(SUM(d.qty * d.unit_cost),0) cost FROM trade_stock_out_detail d " +
+                "JOIN trade_stock_out_main m ON m.out_no=d.out_no WHERE m.out_type='销售出库' GROUP BY d.product_code")) {
+            Map<String,Object> p = prodMap.get(String.valueOf(r.get("product_code")));
+            if (p != null) p.put("cost", toBd(r.get("cost")));
+        }
+
+        // 毛利与毛利率
+        java.util.function.Consumer<Map<String,Object>> fill = m -> {
+            BigDecimal rv = toBd(m.get("revenue")), ct = toBd(m.get("cost"));
+            BigDecimal profit = rv.subtract(ct);
+            m.put("profit", profit);
+            m.put("rate", rv.signum() > 0 ? profit.multiply(new BigDecimal("100")).divide(rv, 1, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+        };
+        for (Map<String,Object> p : prodMap.values()) { fill.accept(p); byProduct.add(p); }
+        byProduct.sort((a, b) -> toBd(b.get("profit")).compareTo(toBd(a.get("profit"))));
+        List<Map<String,Object>> customers = new ArrayList<>(byCustomer.values());
+        for (Map<String,Object> c : customers) fill.accept(c);
+        customers.sort((a, b) -> toBd(b.get("profit")).compareTo(toBd(a.get("profit"))));
+
+        List<Map<String,Object>> monthly = new ArrayList<>();
+        List<String> months = new ArrayList<>(monthRevenue.keySet());
+        Collections.sort(months);
+        for (String m : months) {
+            BigDecimal rv = monthRevenue.getOrDefault(m, BigDecimal.ZERO);
+            BigDecimal ct = monthCost.getOrDefault(m, BigDecimal.ZERO);
+            Map<String,Object> mm = new LinkedHashMap<>();
+            mm.put("name", m);
+            mm.put("revenue", rv.setScale(2, RoundingMode.HALF_UP));
+            mm.put("cost", ct.setScale(2, RoundingMode.HALF_UP));
+            mm.put("profit", rv.subtract(ct).setScale(2, RoundingMode.HALF_UP));
+            monthly.add(mm);
+        }
+
+        Map<String,Object> totals = new LinkedHashMap<>();
+        BigDecimal totProfit = totRevenue.subtract(totCost);
+        totals.put("revenue", totRevenue.setScale(2, RoundingMode.HALF_UP));
+        totals.put("cost", totCost.setScale(2, RoundingMode.HALF_UP));
+        totals.put("profit", totProfit.setScale(2, RoundingMode.HALF_UP));
+        totals.put("rate", totRevenue.signum() > 0 ? totProfit.multiply(new BigDecimal("100")).divide(totRevenue, 1, RoundingMode.HALF_UP) : BigDecimal.ZERO);
+        totals.put("count", sales.size());
+
+        ret.put("totals", totals);
+        ret.put("monthly", monthly);
+        ret.put("byProduct", byProduct);
+        ret.put("byCustomer", customers);
+        return ret;
+    }
+
+    /** 安全库存补货建议：低于预警线的存货，结合采购在途量给出建议补货数与最近供应商 */
+    public List<Map<String,Object>> replenishSuggestions() {
+        List<Map<String,Object>> ret = new ArrayList<>();
+        List<Map<String,Object>> low = db.queryForList(
+            "SELECT product_code, product_name, warehouse, qty, min_stock FROM trade_inventory_balance WHERE qty < min_stock ORDER BY (qty / NULLIF(min_stock,0)) ASC");
+        Map<String, BigDecimal> transit = new LinkedHashMap<>();
+        try {
+            for (Map<String,Object> r : db.queryForList(
+                    "SELECT d.product_code, COALESCE(SUM(d.qty - COALESCE(d.recv_qty,0)),0) t FROM trade_purchase_detail d " +
+                    "JOIN trade_purchase_main m ON m.purchase_no=d.purchase_no " +
+                    "WHERE m.purchase_status NOT IN ('已入库','已取消','已完结','已驳回') GROUP BY d.product_code")) {
+                transit.put(String.valueOf(r.get("product_code")), toBd(r.get("t")));
+            }
+        } catch (Exception e) {
+            for (Map<String,Object> r : db.queryForList(
+                    "SELECT d.product_code, COALESCE(SUM(d.qty),0) t FROM trade_purchase_detail d " +
+                    "JOIN trade_purchase_main m ON m.purchase_no=d.purchase_no " +
+                    "WHERE m.purchase_status NOT IN ('已入库','已取消','已完结','已驳回') GROUP BY d.product_code")) {
+                transit.put(String.valueOf(r.get("product_code")), toBd(r.get("t")));
+            }
+        }
+        Map<String, String> lastSupplier = new LinkedHashMap<>();
+        try {
+            for (Map<String,Object> r : db.queryForList(
+                    "SELECT d.product_code, m.supplier_name FROM trade_purchase_detail d " +
+                    "JOIN trade_purchase_main m ON m.purchase_no=d.purchase_no ORDER BY d.id DESC")) {
+                lastSupplier.putIfAbsent(String.valueOf(r.get("product_code")), String.valueOf(r.getOrDefault("supplier_name", "")));
+            }
+        } catch (Exception ignored) {}
+
+        for (Map<String,Object> l : low) {
+            String code = String.valueOf(l.get("product_code"));
+            BigDecimal qty = toBd(l.get("qty"));
+            BigDecimal min = toBd(l.get("min_stock"));
+            BigDecimal inTransit = transit.getOrDefault(code, BigDecimal.ZERO);
+            BigDecimal suggest = min.multiply(new BigDecimal("2")).subtract(qty).subtract(inTransit).max(BigDecimal.ZERO);
+            Map<String,Object> item = new LinkedHashMap<>(l);
+            item.put("transit", inTransit);
+            item.put("suggest_qty", suggest.setScale(0, RoundingMode.CEILING));
+            item.put("supplier", lastSupplier.getOrDefault(code, ""));
+            ret.add(item);
+        }
+        return ret;
+    }
+
+    private BigDecimal toBd(Object v) {
+        if (v == null) return BigDecimal.ZERO;
+        try { return new BigDecimal(v.toString()); } catch (Exception e) { return BigDecimal.ZERO; }
+    }
+
     private BigDecimal toBd2(Object v) {
         if (v == null) return BigDecimal.ZERO;
         try { return new BigDecimal(v.toString()).setScale(2, RoundingMode.HALF_UP); }

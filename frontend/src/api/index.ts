@@ -67,6 +67,8 @@ export const bizApi = {
   docLinks: (no: string) => request<any>(`/biz/doc-links/${encodeURIComponent(no)}`),
   activityFeed: () => request<any[]>('/biz/activity-feed'),
   todos: () => request<any>('/biz/todos'),
+  profitAnalysis: () => request<any>('/biz/profit-analysis'),
+  replenish: () => request<any[]>('/biz/replenish'),
   createVoucher: (lines: any[], voucherWord = '记', period?: string) => request('/biz/voucher', { method: 'POST', body: JSON.stringify({ lines, voucher_word: voucherWord, period }) }),
   voucherFromSale: (id: number) => request(`/biz/finance/voucher-from-sale/${id}`, { method: 'POST' }),
   voucherFromPurchase: (id: number) => request(`/biz/finance/voucher-from-purchase/${id}`, { method: 'POST' }),

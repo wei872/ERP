@@ -53,6 +53,8 @@ export default function InventoryClosingPage() {
   // 多仓库：仓库主数据 + 库存按仓筛选
   const [warehouses, setWarehouses] = useState<string[]>([]);
   const [whFilter, setWhFilter] = useState('');
+  // 安全库存补货建议
+  const [replenish, setReplenish] = useState<any[]>([]);
   // 仓间调拨表单
   const [tfCode, setTfCode] = useState('');
   const [tfFrom, setTfFrom] = useState('');
@@ -70,6 +72,7 @@ export default function InventoryClosingPage() {
         if (!tfTo) setTfTo(names[1] || '默认仓');
       })
       .catch(() => { setWarehouses(['默认仓']); setTfFrom('默认仓'); setTfTo('默认仓'); });
+    bizApi.replenish().then(r => setReplenish(r.data || [])).catch(() => {});
   }, []);
 
   const doTransfer = async () => {
@@ -263,6 +266,41 @@ export default function InventoryClosingPage() {
                 {saving ? '处理中...' : `确认调拨 ${tfQty || 0} 件：${tfFrom || '?'} → ${tfTo || '?'}`}
               </button>
             </div>
+          </div>
+
+          {/* 安全库存补货建议 */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200/80">
+            <h3 className="font-bold text-slate-800 text-base mb-1 flex items-center gap-2">
+              <span>🧭</span>
+              <span>安全库存补货建议</span>
+              {replenish.length > 0 && <span className="text-[11px] bg-red-50 text-red-600 border border-red-100 px-2 py-0.5 rounded-full font-semibold">{replenish.length} 项低于安全线</span>}
+            </h3>
+            <p className="text-[11px] text-slate-400 mb-4">建议补货量 = 安全线 × 2 − 现有库存 − 采购在途；在途取已下单未入库的采购明细数量</p>
+            {replenish.length === 0 ? (
+              <p className="text-center text-sm text-slate-400 py-6">✅ 全部存货高于安全线，暂无补货建议</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="erp-table text-xs">
+                  <thead><tr>
+                    <th>商品编码</th><th>商品名称</th><th>仓库</th><th>现有库存</th><th>安全线</th><th>采购在途</th><th>建议补货</th><th>最近供应商</th>
+                  </tr></thead>
+                  <tbody>
+                    {replenish.map((r, i) => (
+                      <tr key={i}>
+                        <td className="font-mono whitespace-nowrap">{r.product_code}</td>
+                        <td className="whitespace-nowrap">{r.product_name}</td>
+                        <td className="whitespace-nowrap text-slate-500">{r.warehouse}</td>
+                        <td className="tabular-nums font-bold text-red-600 whitespace-nowrap">{Number(r.qty || 0)}</td>
+                        <td className="tabular-nums text-slate-500 whitespace-nowrap">{Number(r.min_stock || 0)}</td>
+                        <td className="tabular-nums text-slate-500 whitespace-nowrap">{Number(r.transit || 0)}</td>
+                        <td className="whitespace-nowrap"><span className="inline-flex px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-bold tabular-nums">{Number(r.suggest_qty || 0)}</span></td>
+                        <td className="whitespace-nowrap text-slate-500">{r.supplier || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* 实时库存余额与预警线看板 */}
