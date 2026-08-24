@@ -6,6 +6,17 @@ import { bizApi } from '../api';
 import { useTableMeta, statusBadgeClass } from '../meta/store';
 
 const SummaryPanel = lazy(() => import('./SummaryPanel'));
+const DetailDrilldown = lazy(() => import('./DetailDrilldown'));
+
+/** 主单 → 明细钻取配置：单据行一键展开明细（复用后端搜索按关联键检索） */
+const DRILL_CFG: Record<string, { detail: string; key: string; label: string }> = {
+  trade_sales_main: { detail: 'trade_sales_detail', key: 'sales_no', label: '销售单' },
+  trade_purchase_main: { detail: 'trade_purchase_detail', key: 'purchase_no', label: '采购单' },
+  trade_stock_in_main: { detail: 'trade_stock_in_detail', key: 'in_no', label: '入库单' },
+  trade_stock_out_main: { detail: 'trade_stock_out_detail', key: 'out_no', label: '出库单' },
+  voucher_main: { detail: 'voucher_detail', key: 'voucher_no', label: '凭证' },
+  prod_work_order: { detail: 'prod_material_requisition', key: 'ref_work_order', label: '工单领料' },
+};
 
 /** 数字列：千分位 + 最多2位小数；空值显示占位符 */
 function formatCellNum(v: unknown): string {
@@ -42,6 +53,8 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   // 业财一体化联动面板
   const [linkData, setLinkData] = useState<any | null>(null);
   const [linkNo, setLinkNo] = useState('');
+  // 主单明细钻取
+  const [drillKey, setDrillKey] = useState('');
   // 列排序（服务端排序，白名单校验）
   const [sortCol, setSortCol] = useState('');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -67,7 +80,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   };
   // Esc 关闭弹窗
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeModal(); setLinkData(null); setPreviewImg(null); setColPickerOpen(false); } };
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeModal(); setLinkData(null); setPreviewImg(null); setColPickerOpen(false); setDrillKey(''); } };
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
   }, []);
@@ -360,6 +373,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
                 <div className="flex items-center justify-center gap-1.5">
                   {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => openDocLinks(String((row as any)[tableKey === 'trade_sales_main' ? 'sales_no' : 'purchase_no']))} className="px-2.5 py-1 text-[11px] text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-md transition-colors font-medium">🔗 业财</button>}
+                  {DRILL_CFG[tableKey] && <button onClick={() => setDrillKey(String((row as any)[DRILL_CFG[tableKey].key] ?? ''))} className="px-2.5 py-1 text-[11px] text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-md transition-colors font-medium">📄 明细</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
@@ -482,6 +496,24 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
             })()}
           </div>
           <div className="px-6 py-3 border-t bg-slate-50/60 text-[11px] text-slate-400">业务单据发生后，凭证 / 应收应付 / 出入库 / 批次由后端事务自动联动生成，无需手工重复录入。</div>
+        </div>
+      </div>
+    )}
+
+    {/* 主单明细钻取弹窗 */}
+    {drillKey && DRILL_CFG[tableKey] && (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4 erp-modal-bg" onClick={() => setDrillKey('')}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col erp-modal-panel" onClick={e => e.stopPropagation()}>
+          <div className="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-sky-50 to-indigo-50 shrink-0">
+            <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">📄 {DRILL_CFG[tableKey].label}明细 <span className="text-xs font-mono bg-white border border-sky-200 text-sky-700 px-2 py-0.5 rounded-md">{drillKey}</span></h3>
+            <button onClick={() => setDrillKey('')} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <div className="p-6 overflow-y-auto flex-1">
+            <Suspense fallback={<div className="py-10 text-center text-sm text-slate-400"><div className="erp-spinner mx-auto mb-2"></div>加载中...</div>}>
+              <DetailDrilldown detailTable={DRILL_CFG[tableKey].detail} keyValue={drillKey} />
+            </Suspense>
+          </div>
+          <div className="px-6 py-3 border-t bg-slate-50/60 text-[11px] text-slate-400">明细行由业务录入/自动联动生成；主单金额 = 全部明细行金额之和（修改明细会自动重算主单）。</div>
         </div>
       </div>
     )}

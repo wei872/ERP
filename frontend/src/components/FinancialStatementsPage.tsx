@@ -103,6 +103,7 @@ export default function FinancialStatementsPage() {
         </div>
         {data && (
           <div className="flex gap-2 no-print">
+            <button onClick={() => bizApi.reportExcel(stmt, period, NAMES[stmt]).catch((e: any) => toastFn('导出失败: ' + (e.message || '')))} className="px-4 py-2 rounded-lg text-sm bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1.5">⬇ Excel</button>
             <button onClick={exportCsv} className="px-4 py-2 rounded-lg text-sm bg-white border border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600 transition-colors flex items-center gap-1.5">⬇ 导出 CSV</button>
             <button onClick={() => window.print()} className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-white hover:bg-slate-700 transition-colors flex items-center gap-1.5">🖨️ 打印报表</button>
           </div>

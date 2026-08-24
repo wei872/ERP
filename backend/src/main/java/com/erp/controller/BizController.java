@@ -2,6 +2,13 @@ package com.erp.controller;
 
 import com.erp.model.Result;
 import com.erp.service.*;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.IndexedColors;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -10,6 +17,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import javax.servlet.http.HttpServletRequest;
+import java.io.ByteArrayOutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -241,6 +249,88 @@ public class BizController {
             audit.log(user(req), "销售", "销售一键出库", "saleId="+id, audit.getIp(req));
             return Result.ok(r);
         } catch (Exception e) { return Result.error("销售出库联动失败: " + e.getMessage()); }
+    }
+
+    // ── 三大财务报表 Excel(.xlsx) 导出（POI，财务归档级） ──
+    @GetMapping("/report/excel")
+    @SuppressWarnings("unchecked")
+    public ResponseEntity<byte[]> reportExcel(@RequestParam String type, @RequestParam String period, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return ResponseEntity.status(403).build();
+        String name = "balance".equals(type) ? "资产负债表" : "income".equals(type) ? "利润表" : "现金流量表";
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            CellStyle headStyle = wb.createCellStyle();
+            Font hf = wb.createFont(); hf.setBold(true);
+            headStyle.setFont(hf);
+            headStyle.setFillForegroundColor(IndexedColors.GREY_25_PERCENT.getIndex());
+            headStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            Sheet sh = wb.createSheet(name);
+            int r = 0;
+            xlCells(sh, r++, name + "　—　会计期间：" + period + "　—　ERP 企业管理系统");
+            r++;
+            if ("balance".equals(type)) {
+                Map<String,Object> d = report.balanceSheet(period);
+                xlHead(sh, r++, headStyle, "科目编码", "科目名称", "期末余额");
+                for (Map<String,Object> it : (List<Map<String,Object>>) d.getOrDefault("assetItems", Collections.emptyList()))
+                    xlCells(sh, r++, it.get("code"), it.get("name"), it.get("balance"));
+                for (Map<String,Object> it : (List<Map<String,Object>>) d.getOrDefault("liabilityItems", Collections.emptyList()))
+                    xlCells(sh, r++, it.get("code"), it.get("name"), it.get("balance"));
+                r++;
+                xlCells(sh, r++, "资产合计", "", d.get("assets"));
+                xlCells(sh, r++, "负债合计", "", d.get("liabilities"));
+                xlCells(sh, r++, "所有者权益合计", "", d.get("equity"));
+                xlCells(sh, r++, "负债和所有者权益总计", "", d.get("total_liability_equity"));
+            } else if ("income".equals(type)) {
+                Map<String,Object> d = report.incomeStatement(period);
+                xlCells(sh, r++, "营业收入", d.get("revenue"), "营业成本", d.get("cost"));
+                xlCells(sh, r++, "毛利润", d.get("gross_profit"), "净利润", d.get("net_profit"));
+                r++;
+                xlHead(sh, r++, headStyle, "科目编码", "科目名称", "借方发生", "贷方发生", "期末余额");
+                for (Map<String,Object> it : (List<Map<String,Object>>) d.getOrDefault("items", Collections.emptyList()))
+                    xlCells(sh, r++, it.get("subject_code"), it.get("subject_name"), it.get("debit_amount"), it.get("credit_amount"), it.get("end_balance"));
+            } else {
+                Map<String,Object> d = report.cashFlow(period);
+                xlCells(sh, r++, "现金流入", d.get("cash_in"), "现金流出", d.get("cash_out"), "净现金流", d.get("net_cash"));
+                r++;
+                xlHead(sh, r++, headStyle, "流入项目", "金额");
+                for (Map<String,Object> it : (List<Map<String,Object>>) d.getOrDefault("inflow_items", Collections.emptyList()))
+                    xlCells(sh, r++, it.get("name"), it.get("value"));
+                r++;
+                xlHead(sh, r++, headStyle, "流出项目", "金额");
+                for (Map<String,Object> it : (List<Map<String,Object>>) d.getOrDefault("outflow_items", Collections.emptyList()))
+                    xlCells(sh, r++, it.get("name"), it.get("value"));
+            }
+            int[] widths = {16, 30, 18, 18, 18, 18};
+            for (int i = 0; i < widths.length; i++) sh.setColumnWidth(i, widths[i] * 256);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            wb.write(bos);
+            String filename = URLEncoder.encode(name + "_" + period + ".xlsx", "UTF-8").replace("+", "%20");
+            audit.log(user(req), "财务", "导出报表Excel", type + "/" + period, audit.getIp(req));
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(bos.toByteArray());
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
+    private void xlHead(Sheet sh, int r, CellStyle st, String... cols) {
+        Row row = sh.createRow(r);
+        for (int i = 0; i < cols.length; i++) {
+            org.apache.poi.ss.usermodel.Cell c = row.createCell(i);
+            c.setCellValue(cols[i]);
+            c.setCellStyle(st);
+        }
+    }
+
+    private void xlCells(Sheet sh, int r, Object... vals) {
+        Row row = sh.createRow(r);
+        for (int i = 0; i < vals.length; i++) {
+            org.apache.poi.ss.usermodel.Cell c = row.createCell(i);
+            Object v = vals[i];
+            if (v instanceof Number) c.setCellValue(((Number) v).doubleValue());
+            else c.setCellValue(v == null ? "" : String.valueOf(v));
+        }
     }
 
     // ── 待办中心：顶栏铃铛的数据源（审批待办/库存预警/逾期应收应付/待审用户） ──

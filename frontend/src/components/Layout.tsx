@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
@@ -83,6 +83,19 @@ export default function Layout() {
     return { pages, tables: hitTables };
   }, [gq, tables]);
   const jump = (p: Page) => { go(p); setGq(''); setGOpen(false); };
+  // 快捷键「/」唤起全局搜索（输入框聚焦时不触发）
+  const gInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+        e.preventDefault();
+        gInputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, []);
 
   // ── 跨组件导航事件（如仪表盘 KPI 穿透到对应数据表） ──
   useEffect(() => {
@@ -185,9 +198,9 @@ export default function Layout() {
         {/* 全局搜索：功能页 + 162 张数据表即搜即达 */}
         <div className="hidden md:block relative flex-1 max-w-md mx-4">
           <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-          <input value={gq} onChange={e => { setGq(e.target.value); setGOpen(true); }} onFocus={() => setGOpen(true)} onBlur={() => setTimeout(() => setGOpen(false), 180)}
+          <input ref={gInputRef} value={gq} onChange={e => { setGq(e.target.value); setGOpen(true); }} onFocus={() => setGOpen(true)} onBlur={() => setTimeout(() => setGOpen(false), 180)}
             onKeyDown={e => { if (e.key === 'Escape') { setGq(''); setGOpen(false); (e.target as HTMLInputElement).blur(); } }}
-            placeholder="全局搜索：功能页 / 数据表（名称、表名、子模块）" className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50/70 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all"/>
+            placeholder="全局搜索（快捷键 /）：功能页 / 数据表" className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50/70 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all"/>
           {gOpen && gq.trim() && (
             <div className="absolute top-full mt-2 left-0 right-0 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden z-50 max-h-[380px] overflow-y-auto">
               {gResults.pages.length === 0 && gResults.tables.length === 0 && <p className="px-4 py-3 text-xs text-slate-400">未找到匹配项</p>}

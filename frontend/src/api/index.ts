@@ -75,6 +75,7 @@ export const bizApi = {
   confirmRequisition: (body: Record<string, unknown>) => request('/biz/production/requisition-confirm', { method: 'POST', body: JSON.stringify(body) }),
   productionSettle: (workOrderNo: string) => request(`/biz/production/settle/${encodeURIComponent(workOrderNo)}`),
   exportTableCsv: (table: string) => downloadBlob(`/biz/export/${encodeURIComponent(table)}`, `${table}.csv`),
+  reportExcel: (type: string, period: string, name: string) => downloadBlob(`/biz/report/excel?type=${encodeURIComponent(type)}&period=${encodeURIComponent(period)}`, `${name}_${period}.xlsx`),
 };
 
 export const metaApi = {
