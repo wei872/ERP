@@ -7,9 +7,9 @@ import { useMeta } from '../meta/store';
 const COLORS = ['#6366f1','#06b6d4','#10b981','#f59e0b','#ef4444','#8b5cf6'];
 const EMPTY: { name: string; value: number }[] = [];
 
-function StatCard({ icon, label, value, gradient, sub }: { icon: string; label: string; value: string; gradient: string; sub?: string }) {
+function StatCard({ icon, label, value, gradient, sub, onClick }: { icon: string; label: string; value: string; gradient: string; sub?: string; onClick?: () => void }) {
   return (
-    <div className="erp-card erp-card-hover p-5">
+    <div onClick={onClick} title={onClick ? '点击穿透到对应数据表' : undefined} className={`erp-card erp-card-hover p-5 ${onClick ? 'cursor-pointer' : ''}`}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs text-slate-400 font-medium mb-1.5">{label}</p>
@@ -78,6 +78,20 @@ const FEED_META: Record<string, { icon: string; cls: string }> = {
   stock: { icon: '📦', cls: 'bg-emerald-50 text-emerald-600' },
 };
 
+/** 相对时间：今天 / 昨天 / N 天前 / N 个月前 */
+function relTime(d: unknown): string {
+  const s = String(d || '').slice(0, 10);
+  if (!s) return '';
+  const t = new Date(s.replace(/-/g, '/')).getTime();
+  if (Number.isNaN(t)) return s;
+  const days = Math.floor((Date.now() - t) / 86400000);
+  if (days <= 0) return '今天';
+  if (days === 1) return '昨天';
+  if (days < 30) return `${days} 天前`;
+  if (days < 365) return `${Math.floor(days / 30)} 个月前`;
+  return s;
+}
+
 /** 经营动态：最近的销售/采购/凭证/审批/库存事件，业务脉搏一目了然 */
 function ActivityFeed({ items }: { items: any[] }) {
   return (
@@ -98,7 +112,7 @@ function ActivityFeed({ items }: { items: any[] }) {
                 <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 ${m.cls}`}>{m.icon}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-slate-700 truncate">{it.title}</p>
-                  <p className="text-[11px] text-slate-400 truncate">{it.sub || '—'} · {String(it.date || '').slice(0, 10)}</p>
+                  <p className="text-[11px] text-slate-400 truncate" title={String(it.date || '').slice(0, 10)}>{it.sub || '—'} · {relTime(it.date)}</p>
                 </div>
                 <div className="text-right shrink-0">
                   {Number.isFinite(amt) && amt !== 0 && <p className="text-xs font-semibold text-slate-700 tabular-nums">¥{amt.toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>}
@@ -204,11 +218,11 @@ export default function Dashboard() {
 
       {/* KPI Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600" sub={`本月新增 ¥${fmt(curMonthSales)}`}/>
-        <StatCard icon="📦" label="累计销售单数" value={n2v(stats.totalOrders?.value).toLocaleString()} gradient="from-indigo-400 to-indigo-600"/>
-        <StatCard icon="👥" label="客户总数" value={n2v(stats.totalCustomers?.value).toLocaleString()} gradient="from-emerald-400 to-emerald-600"/>
-        <StatCard icon="🏗️" label="累计生产产量" value={`${fmt(n2v(stats.productionOutput?.value))}件`} gradient="from-orange-400 to-orange-600"/>
-        <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600" sub="4104 本年利润结转"/>
+        <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600" sub={`本月新增 ¥${fmt(curMonthSales)}`} onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_sales_main' } }))}/>
+        <StatCard icon="📦" label="累计销售单数" value={n2v(stats.totalOrders?.value).toLocaleString()} gradient="from-indigo-400 to-indigo-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_sales_main' } }))}/>
+        <StatCard icon="👥" label="客户总数" value={n2v(stats.totalCustomers?.value).toLocaleString()} gradient="from-emerald-400 to-emerald-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'cust_customer_main' } }))}/>
+        <StatCard icon="🏗️" label="累计生产产量" value={`${fmt(n2v(stats.productionOutput?.value))}件`} gradient="from-orange-400 to-orange-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'prod_work_order' } }))}/>
+        <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600" sub="4104 本年利润结转" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'account_subject_balance' } }))}/>
       </div>
 
       {/* Charts Row 1 */}

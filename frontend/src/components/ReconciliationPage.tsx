@@ -121,6 +121,52 @@ export default function ReconciliationPage() {
         <div className="bg-amber-50 p-4 rounded-lg"><div className="text-xs text-amber-400">未{tab==='receivable'?'收':'付'}</div><div className="text-xl font-bold text-amber-700">¥{fmt(totalRemain)}</div></div>
       </div>
 
+      {/* 账龄分析：未核销余额按到期日分桶，催收/付款节奏一目了然 */}
+      {(() => {
+        const now = Date.now();
+        const buckets = [
+          { key: '未到期', cls: 'bg-emerald-400', text: 'text-emerald-600', amt: 0 },
+          { key: '逾期 1-30 天', cls: 'bg-amber-300', text: 'text-amber-600', amt: 0 },
+          { key: '逾期 31-60 天', cls: 'bg-orange-400', text: 'text-orange-600', amt: 0 },
+          { key: '逾期 61-90 天', cls: 'bg-red-400', text: 'text-red-500', amt: 0 },
+          { key: '逾期 90 天以上', cls: 'bg-red-600', text: 'text-red-700', amt: 0 },
+        ];
+        for (const r of rows) {
+          const remain = Number(r.remain_amount) || 0;
+          if (remain <= 0) continue;
+          const due = new Date(String(r.due_date || '').slice(0, 10).replace(/-/g, '/')).getTime();
+          const overdue = Number.isFinite(due) ? Math.floor((now - due) / 86400000) : 0;
+          if (overdue <= 0) buckets[0].amt += remain;
+          else if (overdue <= 30) buckets[1].amt += remain;
+          else if (overdue <= 60) buckets[2].amt += remain;
+          else if (overdue <= 90) buckets[3].amt += remain;
+          else buckets[4].amt += remain;
+        }
+        const maxAmt = Math.max(...buckets.map(b => b.amt), 1);
+        const overdueTotal = buckets.slice(1).reduce((s, b) => s + b.amt, 0);
+        return (
+          <div className="erp-card p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><span className="w-1 h-4 rounded-full bg-gradient-to-b from-amber-400 to-red-500"></span>{tab === 'receivable' ? '应收' : '应付'}账龄分析（未核销余额）</h3>
+              {overdueTotal > 0
+                ? <span className="text-[11px] font-medium text-red-600 bg-red-50 border border-red-100 px-2.5 py-1 rounded-full">⚠️ 逾期合计 ¥{overdueTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                : <span className="text-[11px] font-medium text-emerald-600 bg-emerald-50 border border-emerald-100 px-2.5 py-1 rounded-full">✅ 无逾期</span>}
+            </div>
+            <div className="space-y-2.5">
+              {buckets.map(b => (
+                <div key={b.key} className="flex items-center gap-3">
+                  <span className="text-xs text-slate-500 w-28 shrink-0">{b.key}</span>
+                  <div className="flex-1 bg-slate-50 rounded-full h-4 overflow-hidden">
+                    <div className={`h-full rounded-full ${b.cls} transition-all duration-500`} style={{ width: `${Math.max(b.amt > 0 ? 2 : 0, (b.amt / maxAmt) * 100)}%` }}></div>
+                  </div>
+                  <span className={`text-xs font-semibold tabular-nums w-32 text-right ${b.amt > 0 ? b.text : 'text-slate-300'}`}>¥{b.amt.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {error && <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">{error}</div>}
 
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">

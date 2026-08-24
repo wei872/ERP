@@ -55,11 +55,43 @@ export default function Layout() {
   /** 导航跳转（移动端同时收起抽屉） */
   const go = (p: Page) => { setPage(p); if (isMobile) setMobileNav(false); };
   const expanded = sidebarOpen || isMobile;
+
+  const { tables } = useMeta();
+  const tree = useMemo(() => getModuleTree(), [tables]);
+
+  // ── 全局搜索：162 张数据表 + 业务页面即搜即达 ──
+  const [gq, setGq] = useState('');
+  const [gOpen, setGOpen] = useState(false);
+  const PAGE_ENTRIES: Array<{ label: string; icon: string; page: Page }> = [
+    { label: '控制台', icon: '📊', page: { type: 'dashboard' } },
+    { label: '报表中心', icon: '📈', page: { type: 'report' } },
+    { label: '工作流审批', icon: '🔁', page: { type: 'workflow' } },
+    { label: '会计凭证', icon: '📒', page: { type: 'voucher' } },
+    { label: '三大财务报表', icon: '📊', page: { type: 'statements' } },
+    { label: '应收应付核销', icon: '💸', page: { type: 'reconciliation' } },
+    { label: '生产管理', icon: '🏗️', page: { type: 'production' } },
+    { label: 'MRP运算', icon: '🧮', page: { type: 'mrp' } },
+    { label: '库存直调&期末', icon: '🛠️', page: { type: 'ops' } },
+    { label: '财务模版库', icon: '💰', page: { type: 'finance' } },
+  ];
+  const gResults = useMemo(() => {
+    const q = gq.trim().toLowerCase();
+    if (!q) return { pages: [] as typeof PAGE_ENTRIES, tables: [] as typeof tables };
+    const pages = PAGE_ENTRIES.filter(p => p.label.toLowerCase().includes(q)).slice(0, 4);
+    const hitTables = tables.filter(t => t.cnName.toLowerCase().includes(q) || t.table.toLowerCase().includes(q) || t.sub.toLowerCase().includes(q)).slice(0, 8);
+    return { pages, tables: hitTables };
+  }, [gq, tables]);
+  const jump = (p: Page) => { go(p); setGq(''); setGOpen(false); };
+
+  // ── 跨组件导航事件（如仪表盘 KPI 穿透到对应数据表） ──
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent).detail; if (d && d.type) setPage(d); };
+    window.addEventListener('erp:navigate', h);
+    return () => window.removeEventListener('erp:navigate', h);
+  }, []);
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
   const pendingCount = users.filter(u => u.status === 'pending').length;
-  const { tables } = useMeta();
-  const tree = useMemo(() => getModuleTree(), [tables]);
 
   const visibleModules = useMemo(() => {
     if (!currentUser) return [];
@@ -139,6 +171,30 @@ export default function Layout() {
         <div className="flex items-center gap-2 min-w-0">
           {isMobile && <button onClick={() => setMobileNav(true)} title="打开菜单" className="p-2 -ml-1 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors shrink-0"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg></button>}
           <h2 className="text-[15px] font-semibold text-slate-800 truncate tracking-tight">{getPageTitle()}</h2>
+        </div>
+        {/* 全局搜索：功能页 + 162 张数据表即搜即达 */}
+        <div className="hidden md:block relative flex-1 max-w-md mx-4">
+          <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input value={gq} onChange={e => { setGq(e.target.value); setGOpen(true); }} onFocus={() => setGOpen(true)} onBlur={() => setTimeout(() => setGOpen(false), 180)}
+            onKeyDown={e => { if (e.key === 'Escape') { setGq(''); setGOpen(false); (e.target as HTMLInputElement).blur(); } }}
+            placeholder="全局搜索：功能页 / 数据表（名称、表名、子模块）" className="w-full pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50/70 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 transition-all"/>
+          {gOpen && gq.trim() && (
+            <div className="absolute top-full mt-2 left-0 right-0 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden z-50 max-h-[380px] overflow-y-auto">
+              {gResults.pages.length === 0 && gResults.tables.length === 0 && <p className="px-4 py-3 text-xs text-slate-400">未找到匹配项</p>}
+              {gResults.pages.map(p => (
+                <button key={p.label} onMouseDown={() => jump(p.page)} className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-sm hover:bg-indigo-50 transition-colors">
+                  <span>{p.icon}</span><span className="text-slate-700 font-medium">{p.label}</span><span className="ml-auto text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">功能页</span>
+                </button>
+              ))}
+              {gResults.tables.map(t => (
+                <button key={t.table} onMouseDown={() => jump({ type: 'table', tableKey: t.table })} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-indigo-50 transition-colors">
+                  <span className="text-slate-700">{t.cnName}</span>
+                  <span className="text-[10px] font-mono text-slate-400">{t.table}</span>
+                  <span className="ml-auto text-[10px] text-slate-400 truncate max-w-[120px]">{t.module} / {t.sub}</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className={`erp-badge ${ROLE_COLORS[currentUser.role]}`}>{ROLE_LABELS[currentUser.role]}</span>

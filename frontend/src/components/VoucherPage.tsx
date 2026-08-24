@@ -1,6 +1,8 @@
 import { toastNotify } from '../utils/toast';
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import { bizApi } from '../api';
+
+const SummaryPanel = lazy(() => import('./SummaryPanel'));
 
 type Line = { subject_code: string; subject_name: string; debit_amount: number; credit_amount: number; summary: string };
 
@@ -62,6 +64,9 @@ export default function VoucherPage() {
 
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
+
+      {/* 凭证汇总卡片 + 分析图 */}
+      <Suspense fallback={null}><SummaryPanel tableKey="voucher_main" /></Suspense>
 
       {/* UI 引导与数据联动说明 */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">

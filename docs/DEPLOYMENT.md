@@ -126,11 +126,14 @@ npm run build          # 产物在 dist/
 ## 5. 备份与恢复
 
 ```bash
-# 每日备份（crontab -e，凌晨 2 点）
-0 2 * * * docker exec erp-db sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" erp_system | gzip > /backup/erp_$(date +\%F).sql.gz'
+# 推荐：使用自带备份脚本（gzip 压缩 + 自动清理 30 天前旧备份）
+chmod +x deploy/backup.sh
+crontab -e   # 每天凌晨 2 点执行
+0 2 * * * /路径/erp/deploy/backup.sh >> /路径/erp/deploy/backup.log 2>&1
 
-# 恢复
-gunzip -c erp_2026-01-01.sql.gz | docker exec -i erp-db sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" erp_system'
+# 手工备份 / 恢复
+docker exec erp-db sh -c 'exec mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" --single-transaction erp_system | gzip' > erp_backup.sql.gz
+gunzip -c erp_backup.sql.gz | docker exec -i erp-db sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" erp_system'
 ```
 
 建议保留最近 30 天日备 + 12 个月月备，并定期演练恢复。

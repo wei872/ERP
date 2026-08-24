@@ -65,9 +65,17 @@ export default function FinancialStatementsPage() {
         </div>
       </div>
 
-      <div>
-        <h2 className="text-xl font-bold text-gray-800">📊 三大财务报表</h2>
-        <p className="text-sm text-gray-500 mt-1">按会计期间查询：资产负债表 / 利润表 / 现金流量表（后端基于 account_subject_balance 实时聚合）</p>
+      <div className="flex items-center justify-between no-print">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">📊 三大财务报表</h2>
+          <p className="text-sm text-gray-500 mt-1">按会计期间查询：资产负债表 / 利润表 / 现金流量表（后端基于 account_subject_balance 实时聚合）</p>
+        </div>
+        {data && <button onClick={() => window.print()} className="px-4 py-2 rounded-lg text-sm bg-slate-800 text-white hover:bg-slate-700 transition-colors flex items-center gap-1.5">🖨️ 打印报表</button>}
+      </div>
+      {/* 打印专用抬头（屏幕上隐藏） */}
+      <div className="hidden print:block text-center mb-2">
+        <h1 className="text-lg font-bold text-slate-800">ERP 企业管理系统 · {NAMES[stmt]}</h1>
+        <p className="text-xs text-slate-500 mt-1">会计期间：{period} · 打印时间：{new Date().toLocaleString('zh-CN')}</p>
       </div>
 
       <div className="bg-white rounded-xl p-4 shadow-sm border flex flex-wrap items-end gap-3">

@@ -1,7 +1,9 @@
 import { toastNotify } from '../utils/toast';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { bizApi, dataApi } from '../api';
 import { useAuth } from '../context/AuthContext';
+
+const SummaryPanel = lazy(() => import('./SummaryPanel'));
 
 type Action = 'workorder' | 'warehousing' | 'scrap' | 'requisition' | 'settle';
 const ACTIONS: Record<Action, { title: string; icon: string; color: string }> = {
@@ -160,6 +162,9 @@ export default function ProductionPage() {
 
   return (
     <div className="erp-fade-in p-6 space-y-6 max-w-[1350px] mx-auto">
+
+      {/* 工单汇总卡片 + 分析图 */}
+      <Suspense fallback={null}><SummaryPanel tableKey="prod_work_order" /></Suspense>
 
       {/* UI 引导与数据联动说明 */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
