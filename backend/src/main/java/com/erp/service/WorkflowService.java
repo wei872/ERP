@@ -14,13 +14,13 @@ public class WorkflowService {
     @Autowired private JdbcTemplate db;
     @Autowired private FinanceService finance;
 
-    /** 各审批类型的节点序列（assignee 当前简化为 admin，后续可按部门/职位指派） */
-    private static final Map<String, List<String>> NODE_TEMPLATES = new HashMap<>();
+    /** 各审批类型的节点序列：节点名 + 指派角色（myTasks 按角色/用户名可见） */
+    private static final Map<String, String[][]> NODE_TEMPLATES = new HashMap<>();
     static {
-        NODE_TEMPLATES.put("采购审批", Arrays.asList("部门经理审核", "总经理审批", "财务总监审批"));
-        NODE_TEMPLATES.put("费用审批", Arrays.asList("部门经理审核", "财务审核"));
-        NODE_TEMPLATES.put("请假审批", Arrays.asList("部门经理审核", "HR复核"));
-        NODE_TEMPLATES.put("default", Collections.singletonList("审批人审核"));
+        NODE_TEMPLATES.put("采购审批", new String[][]{{"部门经理审核","procurement"},{"总经理审批","admin"},{"财务总监审批","accounting"}});
+        NODE_TEMPLATES.put("费用审批", new String[][]{{"部门经理审核","admin"},{"财务审核","accounting"}});
+        NODE_TEMPLATES.put("请假审批", new String[][]{{"部门经理审核","admin"},{"HR复核","hr"}});
+        NODE_TEMPLATES.put("default", new String[][]{{"审批人审核","admin"}});
     }
 
     /** 审批通过 → 完成当前节点 task，前进到下一节点；若已是末节点则更新主表+联动业务 */
@@ -117,7 +117,7 @@ public class WorkflowService {
         } catch (Exception ignored) {}
     }
 
-    /** 提交审批 — 创建审批主表 + 流程实例 + 多级 task 节点 + 审批类型明细表 */
+    /** 提交审批 — 创建审批主表 + 流程实例 + 多级 task 节点（按角色指派） + 审批类型明细表 */
     @Transactional
     public void submit(String type, String applicant, String dept, String refNo, BigDecimal amount, String remark) {
         String no = "AP-" + System.currentTimeMillis();
@@ -125,19 +125,48 @@ public class WorkflowService {
             no, type, applicant, dept, refNo == null ? "" : refNo, amount == null ? BigDecimal.ZERO : amount, remark);
         db.update("INSERT INTO oa_flow_instance(instance_no,workflow_code,applicant,start_date,current_node,instance_status) VALUES(?,?,?,NOW(),'审批中','待处理')",
             no, type, applicant);
-        // 创建多级 task 节点
-        List<String> nodes = NODE_TEMPLATES.getOrDefault(type, NODE_TEMPLATES.get("default"));
+        // 申请人角色（用于同角色节点自动跳过，防止自审自批）
+        String applicantRole = "sales";
+        try {
+            List<Map<String,Object>> u = db.queryForList("SELECT role FROM sys_user WHERE username=?", applicant);
+            if (!u.isEmpty() && u.get(0).get("role") != null) applicantRole = String.valueOf(u.get(0).get("role"));
+        } catch (Exception ignored) {}
+        // 创建多级 task 节点（assignee = 角色编码，待办按用户名/角色可见）
+        String[][] nodes = NODE_TEMPLATES.containsKey(type) ? NODE_TEMPLATES.get(type) : NODE_TEMPLATES.get("default");
         int idx = 0;
-        for (String nodeName : nodes) {
+        boolean activated = false;
+        boolean anyPending = false;
+        for (String[] node : nodes) {
             idx++;
             String taskNo = no + "-T" + idx;
-            String status = idx == 1 ? "待处理" : "未触发"; // 仅首个节点立即待处理，其余在前置完成后才激活
-            db.update("INSERT INTO oa_flow_task(task_no,instance_no,task_name,assignee,create_date,task_status) VALUES(?,?,?,admin,CURDATE(),?)",
-                taskNo, no, nodeName, status);
+            String nodeName = node[0];
+            String assignee = node[1];
+            boolean autoSkip = assignee.equals(applicantRole) && !"admin".equals(applicantRole);
+            if (autoSkip) {
+                db.update("INSERT INTO oa_flow_task(task_no,instance_no,task_name,assignee,create_date,complete_date,task_status,remark) VALUES(?,?,?,?,CURDATE(),CURDATE(),'已通过','与申请人同角色自动跳过')",
+                    taskNo, no, nodeName, "系统");
+                db.update("INSERT INTO oa_flow_log(log_no,instance_no,operator,action,action_date,comment) VALUES(?,?,?,?,CURDATE(),?)",
+                    "LOG-" + System.currentTimeMillis() + "-" + idx, no, "系统", "通过-" + nodeName, "与申请人同角色自动跳过");
+                continue;
+            }
+            String status = activated ? "未触发" : "待处理";
+            activated = true;
+            anyPending = true;
+            db.update("INSERT INTO oa_flow_task(task_no,instance_no,task_name,assignee,create_date,task_status) VALUES(?,?,?,?,CURDATE(),?)",
+                taskNo, no, nodeName, assignee, status);
         }
         // 写起始日志
         db.update("INSERT INTO oa_flow_log(log_no,instance_no,operator,action,action_date,comment) VALUES(?,?,?,?,CURDATE(),'提交审批')",
             "LOG-" + System.currentTimeMillis() + "-S", no, applicant, "提交");
+        if (!anyPending) {
+            // 全部节点被自动跳过 → 直接终结（联动业务）
+            Map<String,Object> row = new HashMap<>();
+            row.put("approval_no", no);
+            row.put("approval_type", type);
+            row.put("ref_no", refNo == null ? "" : refNo);
+            row.put("amount", amount == null ? BigDecimal.ZERO : amount);
+            finalizeApproval(row, "系统", "全部节点自动跳过");
+        }
         // 同步审批类型明细表
         try {
             if ("采购审批".equals(type) && refNo != null && !refNo.isEmpty()) {
@@ -157,13 +186,14 @@ public class WorkflowService {
         }
     }
 
-    /** 当前用户待办任务 */
-    public List<Map<String,Object>> myTasks(String username) {
+    /** 当前用户待办任务：按用户名或所属角色匹配（admin 可见全部） */
+    public List<Map<String,Object>> myTasks(String username, String role) {
         return db.queryForList(
             "SELECT t.task_no, t.instance_no, t.task_name, t.assignee, t.create_date, t.task_status, " +
             "a.approval_type, a.applicant, a.department, a.amount, a.ref_no, a.remark submit_remark " +
             "FROM oa_flow_task t JOIN oa_approval_main a ON a.approval_no=t.instance_no " +
-            "WHERE t.task_status='待处理' AND (t.assignee=? OR ?='admin') ORDER BY t.id DESC", username, username);
+            "WHERE t.task_status='待处理' AND (t.assignee=? OR t.assignee=? OR ?='admin') ORDER BY t.id DESC",
+            username, role, username);
     }
 
     /** 审批单详情（主表 + 流程实例 + 任务节点 + 日志） */

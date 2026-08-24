@@ -84,7 +84,7 @@ public class BizController {
 
     // ── 工作流：任务列表 / 详情 ──
     @GetMapping("/my-tasks") public Result myTasks(HttpServletRequest req) {
-        return Result.ok(workflow.myTasks(String.valueOf(req.getAttribute("user"))));
+        return Result.ok(workflow.myTasks(String.valueOf(req.getAttribute("user")), String.valueOf(req.getAttribute("role"))));
     }
     @GetMapping("/approval/{approvalNo}") public Result approvalDetail(@PathVariable String approvalNo) {
         return Result.ok(workflow.approvalDetail(approvalNo));
@@ -337,11 +337,12 @@ public class BizController {
     @GetMapping("/todos") public Result todos(HttpServletRequest req) {
         try {
             String user = String.valueOf(req.getAttribute("user"));
+            String role = String.valueOf(req.getAttribute("role"));
             boolean isAdmin = "admin".equals(req.getAttribute("role"));
             Map<String,Object> ret = new LinkedHashMap<>();
-            ret.put("pendingApprovals", "admin".equals(user)
+            ret.put("pendingApprovals", isAdmin
                 ? db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理'", Long.class)
-                : db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理' AND assignee=?", Long.class, user));
+                : db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理' AND (assignee=? OR assignee=?)", Long.class, user, role));
             Map<String,Object> low = new LinkedHashMap<>();
             low.put("count", db.queryForObject("SELECT COUNT(*) FROM trade_inventory_balance WHERE stock_status='预警'", Long.class));
             low.put("items", db.queryForList("SELECT product_code, product_name, qty, min_stock FROM trade_inventory_balance WHERE stock_status='预警' ORDER BY (qty / NULLIF(min_stock,0)) ASC LIMIT 6"));

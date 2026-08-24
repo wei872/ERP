@@ -158,7 +158,7 @@ export default function WorkflowPage() {
             <div className="bg-white rounded-xl p-12 shadow-sm border text-center">
               <div className="text-4xl mb-3">✅</div>
               <p className="text-gray-500">暂无待办任务</p>
-              <p className="text-xs text-gray-400 mt-1">admin 可见全部待处理节点；其他角色按 assignee 匹配</p>
+              <p className="text-xs text-gray-400 mt-1">节点按角色指派（采购→采购/管理员/会计，费用→管理员/会计，请假→管理员/人事）；与申请人同角色的节点自动跳过，admin 可见全部待办</p>
             </div>
           )}
           {tasks.map(t => (

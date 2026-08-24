@@ -373,14 +373,14 @@ for (const s of sales.filter(x => x.ship === '已出库')) {
 const approvals = [];
 const pendPurchases = purchases.filter(p => p.status === '待审批');
 const apprPurchases = purchases.filter(p => p.status === '已审批');
-if (pendPurchases[0]) approvals.push({ no: 'AP-D-0001', type: '采购审批', m: 0, applicant: '周八', dept: '采购部', ref: pendPurchases[0].no, amount: pendPurchases[0].lines.reduce((t, l) => t + l.qty * l.price, 0), status: '待审批', nodes: [['部门经理审核', '待处理'], ['总经理审批', '未触发'], ['财务总监审批', '未触发']], remark: '月度原材料采购申请' });
-if (pendPurchases[1]) approvals.push({ no: 'AP-D-0002', type: '采购审批', m: 0, applicant: '周八', dept: '采购部', ref: pendPurchases[1].no, amount: pendPurchases[1].lines.reduce((t, l) => t + l.qty * l.price, 0), status: '待审批', nodes: [['部门经理审核', '待处理'], ['总经理审批', '未触发'], ['财务总监审批', '未触发']], remark: '补充采购-结构件' });
-approvals.push({ no: 'AP-D-0003', type: '费用审批', m: 0, applicant: '张三', dept: '销售部', ref: '', amount: 4200, status: '待审批', nodes: [['部门经理审核', '待处理'], ['财务审核', '未触发']], remark: '华东区客户拜访差旅费' });
-approvals.push({ no: 'AP-D-0004', type: '请假审批', m: 0, applicant: '孙七', dept: '人事部', ref: '', amount: 0, status: '待审批', nodes: [['部门经理审核', '待处理'], ['HR复核', '未触发']], remark: '年假3天' });
-if (apprPurchases[0]) approvals.push({ no: 'AP-D-0005', type: '采购审批', m: 1, applicant: '周八', dept: '采购部', ref: apprPurchases[0].no, amount: apprPurchases[0].lines.reduce((t, l) => t + l.qty * l.price, 0), status: '已通过', nodes: [['部门经理审核', '已通过'], ['总经理审批', '已通过'], ['财务总监审批', '已通过']], remark: '传感器元件采购' });
-approvals.push({ no: 'AP-D-0006', type: '费用审批', m: 2, applicant: '李四', dept: '仓储部', ref: '', amount: 1680, status: '已通过', nodes: [['部门经理审核', '已通过'], ['财务审核', '已通过']], remark: '仓储货架维修费' });
-approvals.push({ no: 'AP-D-0007', type: '请假审批', m: 3, applicant: '王五', dept: '财务部', ref: '', amount: 0, status: '已通过', nodes: [['部门经理审核', '已通过'], ['HR复核', '已通过']], remark: '事假1天' });
-approvals.push({ no: 'AP-D-0008', type: '费用审批', m: 2, applicant: '赵六', dept: '生产部', ref: '', amount: 29800, status: '已驳回', nodes: [['部门经理审核', '已驳回'], ['财务审核', '已取消']], remark: '车间设备采购-超预算驳回' });
+if (pendPurchases[0]) approvals.push({ no: 'AP-D-0001', type: '采购审批', m: 0, applicant: '周八', dept: '采购部', ref: pendPurchases[0].no, amount: pendPurchases[0].lines.reduce((t, l) => t + l.qty * l.price, 0), status: '待审批', nodes: [['部门经理审核', '已通过', '系统'], ['总经理审批', '待处理', 'admin'], ['财务总监审批', '未触发', 'accounting']], remark: '月度原材料采购申请' });
+if (pendPurchases[1]) approvals.push({ no: 'AP-D-0002', type: '采购审批', m: 0, applicant: '周八', dept: '采购部', ref: pendPurchases[1].no, amount: pendPurchases[1].lines.reduce((t, l) => t + l.qty * l.price, 0), status: '待审批', nodes: [['部门经理审核', '已通过', '系统'], ['总经理审批', '待处理', 'admin'], ['财务总监审批', '未触发', 'accounting']], remark: '补充采购-结构件' });
+approvals.push({ no: 'AP-D-0003', type: '费用审批', m: 0, applicant: '张三', dept: '销售部', ref: '', amount: 4200, status: '待审批', nodes: [['部门经理审核', '待处理', 'admin'], ['财务审核', '未触发', 'accounting']], remark: '华东区客户拜访差旅费' });
+approvals.push({ no: 'AP-D-0004', type: '请假审批', m: 0, applicant: '孙七', dept: '人事部', ref: '', amount: 0, status: '待审批', nodes: [['部门经理审核', '待处理', 'admin'], ['HR复核', '未触发', 'hr']], remark: '年假3天' });
+if (apprPurchases[0]) approvals.push({ no: 'AP-D-0005', type: '采购审批', m: 1, applicant: '周八', dept: '采购部', ref: apprPurchases[0].no, amount: apprPurchases[0].lines.reduce((t, l) => t + l.qty * l.price, 0), status: '已通过', nodes: [['部门经理审核', '已通过', '系统'], ['总经理审批', '已通过', 'admin'], ['财务总监审批', '已通过', 'accounting']], remark: '传感器元件采购' });
+approvals.push({ no: 'AP-D-0006', type: '费用审批', m: 2, applicant: '李四', dept: '仓储部', ref: '', amount: 1680, status: '已通过', nodes: [['部门经理审核', '已通过', 'admin'], ['财务审核', '已通过', 'accounting']], remark: '仓储货架维修费' });
+approvals.push({ no: 'AP-D-0007', type: '请假审批', m: 3, applicant: '王五', dept: '财务部', ref: '', amount: 0, status: '已通过', nodes: [['部门经理审核', '已通过', 'admin'], ['HR复核', '已通过', 'hr']], remark: '事假1天' });
+approvals.push({ no: 'AP-D-0008', type: '费用审批', m: 2, applicant: '赵六', dept: '生产部', ref: '', amount: 29800, status: '已驳回', nodes: [['部门经理审核', '已驳回', 'admin'], ['财务审核', '已取消', 'accounting']], remark: '车间设备采购-超预算驳回' });
 
 // ══════════════════════ 输出 SQL ══════════════════════
 emit('-- ============================================================');
@@ -593,8 +593,9 @@ for (const a of approvals) {
   const instStatus = a.status === '待审批' ? '待处理' : a.status === '已驳回' ? '已终止' : '已完成';
   const curNode = a.status === '待审批' ? a.nodes[0][0] : a.status === '已驳回' ? '已驳回' : '审批完成';
   apInstRows.push([q(a.no), q(a.type), q(a.applicant), dAgo(dayAgo), q(curNode), q(instStatus)]);
-  a.nodes.forEach(([name, st], i) => {
-    apTaskRows.push([q(`${a.no}-T${i + 1}`), q(a.no), q(name), q('admin'), dAgo(dayAgo), st === '待处理' || st === '已通过' ? dAgo(Math.max(0, dayAgo - 1)) : 'NULL', q(st)]);
+  a.nodes.forEach((nd, i) => {
+    const name = nd[0], st = nd[1], assignee = nd[2] || 'admin';
+    apTaskRows.push([q(`${a.no}-T${i + 1}`), q(a.no), q(name), q(assignee), dAgo(dayAgo), st === '待处理' || st === '已通过' ? dAgo(Math.max(0, dayAgo - 1)) : 'NULL', q(st)]);
   });
   apLogRows.push([q(`${a.no}-L1`), q(a.no), q(a.applicant), q('提交'), dAgo(dayAgo), q('提交审批')]);
   if (a.status !== '待审批') {

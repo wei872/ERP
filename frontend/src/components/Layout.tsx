@@ -20,6 +20,7 @@ const RbacPage = lazy(() => import('./RbacPage'));
 const ReconciliationPage = lazy(() => import('./ReconciliationPage'));
 const AuditLogPage = lazy(() => import('./AuditLogPage'));
 const ProfitPage = lazy(() => import('./ProfitPage'));
+const BigScreen = lazy(() => import('./BigScreen'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -120,6 +121,7 @@ export default function Layout() {
   const todoJump = (p: Page) => { go(p); setTodoOpen(false); };
 
   // ── 常用表收藏（表格页星标切换，跨事件同步） ──
+  const [bigScreen, setBigScreen] = useState(false);
   const readFavs = () => { try { return JSON.parse(localStorage.getItem('erp_fav_tables') || '[]') as string[]; } catch { return []; } };
   const [favTables, setFavTables] = useState<string[]>(readFavs);
   useEffect(() => {
@@ -246,6 +248,10 @@ export default function Layout() {
           )}
         </div>
         <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* 数据大屏 */}
+          <button onClick={() => setBigScreen(true)} title="经营驾驶舱（数据大屏）" className="no-print p-2 rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18v12H3zM8 20h8m-4-4v4"/></svg>
+          </button>
           {/* 待办铃铛 */}
           <div className="relative">
             <button onClick={() => { setTodoOpen(o => !o); loadTodos(); }} title="待办中心" className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors">
@@ -344,6 +350,7 @@ export default function Layout() {
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
         </Suspense>
       </main>
+      {bigScreen && <Suspense fallback={null}><BigScreen onExit={() => setBigScreen(false)} /></Suspense>}
     </div>
   </div>);
 }

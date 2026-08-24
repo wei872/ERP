@@ -2699,18 +2699,18 @@ INSERT IGNORE INTO oa_flow_instance (instance_no,workflow_code,applicant,start_d
 ('AP-D-0008','费用审批','赵六',DATE_SUB(CURDATE(), INTERVAL 65 DAY),'已驳回','已终止');
 INSERT IGNORE INTO oa_flow_task (task_no,instance_no,task_name,assignee,create_date,complete_date,task_status) VALUES
 ('AP-D-0003-T1','AP-D-0003','部门经理审核','admin',DATE_SUB(CURDATE(), INTERVAL 1 DAY),CURDATE(),'待处理'),
-('AP-D-0003-T2','AP-D-0003','财务审核','admin',DATE_SUB(CURDATE(), INTERVAL 1 DAY),NULL,'未触发'),
+('AP-D-0003-T2','AP-D-0003','财务审核','accounting',DATE_SUB(CURDATE(), INTERVAL 1 DAY),NULL,'未触发'),
 ('AP-D-0004-T1','AP-D-0004','部门经理审核','admin',DATE_SUB(CURDATE(), INTERVAL 4 DAY),DATE_SUB(CURDATE(), INTERVAL 3 DAY),'待处理'),
-('AP-D-0004-T2','AP-D-0004','HR复核','admin',DATE_SUB(CURDATE(), INTERVAL 4 DAY),NULL,'未触发'),
-('AP-D-0005-T1','AP-D-0005','部门经理审核','admin',DATE_SUB(CURDATE(), INTERVAL 39 DAY),DATE_SUB(CURDATE(), INTERVAL 38 DAY),'已通过'),
+('AP-D-0004-T2','AP-D-0004','HR复核','hr',DATE_SUB(CURDATE(), INTERVAL 4 DAY),NULL,'未触发'),
+('AP-D-0005-T1','AP-D-0005','部门经理审核','系统',DATE_SUB(CURDATE(), INTERVAL 39 DAY),DATE_SUB(CURDATE(), INTERVAL 38 DAY),'已通过'),
 ('AP-D-0005-T2','AP-D-0005','总经理审批','admin',DATE_SUB(CURDATE(), INTERVAL 39 DAY),DATE_SUB(CURDATE(), INTERVAL 38 DAY),'已通过'),
-('AP-D-0005-T3','AP-D-0005','财务总监审批','admin',DATE_SUB(CURDATE(), INTERVAL 39 DAY),DATE_SUB(CURDATE(), INTERVAL 38 DAY),'已通过'),
+('AP-D-0005-T3','AP-D-0005','财务总监审批','accounting',DATE_SUB(CURDATE(), INTERVAL 39 DAY),DATE_SUB(CURDATE(), INTERVAL 38 DAY),'已通过'),
 ('AP-D-0006-T1','AP-D-0006','部门经理审核','admin',DATE_SUB(CURDATE(), INTERVAL 64 DAY),DATE_SUB(CURDATE(), INTERVAL 63 DAY),'已通过'),
-('AP-D-0006-T2','AP-D-0006','财务审核','admin',DATE_SUB(CURDATE(), INTERVAL 64 DAY),DATE_SUB(CURDATE(), INTERVAL 63 DAY),'已通过'),
+('AP-D-0006-T2','AP-D-0006','财务审核','accounting',DATE_SUB(CURDATE(), INTERVAL 64 DAY),DATE_SUB(CURDATE(), INTERVAL 63 DAY),'已通过'),
 ('AP-D-0007-T1','AP-D-0007','部门经理审核','admin',DATE_SUB(CURDATE(), INTERVAL 91 DAY),DATE_SUB(CURDATE(), INTERVAL 90 DAY),'已通过'),
-('AP-D-0007-T2','AP-D-0007','HR复核','admin',DATE_SUB(CURDATE(), INTERVAL 91 DAY),DATE_SUB(CURDATE(), INTERVAL 90 DAY),'已通过'),
+('AP-D-0007-T2','AP-D-0007','HR复核','hr',DATE_SUB(CURDATE(), INTERVAL 91 DAY),DATE_SUB(CURDATE(), INTERVAL 90 DAY),'已通过'),
 ('AP-D-0008-T1','AP-D-0008','部门经理审核','admin',DATE_SUB(CURDATE(), INTERVAL 65 DAY),NULL,'已驳回'),
-('AP-D-0008-T2','AP-D-0008','财务审核','admin',DATE_SUB(CURDATE(), INTERVAL 65 DAY),NULL,'已取消');
+('AP-D-0008-T2','AP-D-0008','财务审核','accounting',DATE_SUB(CURDATE(), INTERVAL 65 DAY),NULL,'已取消');
 INSERT IGNORE INTO oa_flow_log (log_no,instance_no,operator,action,action_date,comment) VALUES
 ('AP-D-0003-L1','AP-D-0003','张三','提交',DATE_SUB(CURDATE(), INTERVAL 1 DAY),'提交审批'),
 ('AP-D-0004-L1','AP-D-0004','孙七','提交',DATE_SUB(CURDATE(), INTERVAL 4 DAY),'提交审批'),
