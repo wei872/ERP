@@ -1,8 +1,10 @@
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { dataApi } from '../api';
 import { bizApi } from '../api';
 import { useTableMeta, statusBadgeClass } from '../meta/store';
+
+const SummaryPanel = lazy(() => import('./SummaryPanel'));
 
 /** 数字列：千分位 + 最多2位小数；空值显示占位符 */
 function formatCellNum(v: unknown): string {
@@ -34,7 +36,15 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [previewImg, setPreviewImg] = useState<string | null>(null);
+  // 行业物料编码规则（商品表新增时一键生成编码）
+  const [codeRules, setCodeRules] = useState<any[]>([]);
+  const [codeRule, setCodeRule] = useState('');
+  // 业财一体化联动面板
+  const [linkData, setLinkData] = useState<any | null>(null);
+  const [linkNo, setLinkNo] = useState('');
   const pageSize = 15;
+
+
 
   const { meta: table, loading: metaLoading } = useTableMeta(tableKey);
   const isAdmin = currentUser?.role === 'admin';
@@ -77,6 +87,27 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
 
   const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
   const toastFn = useCallback((msg: string) => { setToast(msg); setTimeout(() => setToast(''), 2500); }, []);
+
+  // 行业物料编码规则：商品表打开时加载规则列表
+  useEffect(() => {
+    if (tableKey === 'trade_goods_main') {
+      bizApi.codeRules().then(r => { setCodeRules(r.data || []); if (r.data?.length) setCodeRule(r.data[0].rule_code); }).catch(() => {});
+    }
+  }, [tableKey]);
+
+  const genGoodsCode = useCallback(async () => {
+    if (!codeRule) { toastFn('请先选择编码规则'); return; }
+    try {
+      const r = await bizApi.nextCode(codeRule);
+      setFormData(p => ({ ...p, product_code: r.data.code }));
+      toastFn(`已按「${r.data.rule_name}」生成编码 ${r.data.code}`);
+    } catch (e: any) { toastFn('生成编码失败：' + (e.message || '')); }
+  }, [codeRule, toastFn]);
+
+  const openDocLinks = useCallback(async (no: string) => {
+    try { setLinkNo(no); setLinkData(await (await bizApi.docLinks(no)).data); }
+    catch (e: any) { toastFn('联动查询失败：' + (e.message || '')); }
+  }, [toastFn]);
 
   const handleFileUpload = useCallback((k: string, file: File | null) => {
     if (!file) return;
@@ -239,6 +270,9 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
       </div>
     </div>
 
+    {/* 汇总卡片 + 分析图（每个业务列表页自带） */}
+    <Suspense fallback={null}><SummaryPanel tableKey={tableKey} /></Suspense>
+
     {!canAdd && !canEdit && !canDelete && <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-xs text-amber-700 flex items-center gap-2">⚠️ 当前为仅查看模式</div>}
 
     <div className="erp-card overflow-hidden">
@@ -262,6 +296,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
               </td>; })}
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
                 <div className="flex items-center justify-center gap-1.5">
+                  {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => openDocLinks(String((row as any)[tableKey === 'trade_sales_main' ? 'sales_no' : 'purchase_no']))} className="px-2.5 py-1 text-[11px] text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-md transition-colors font-medium">🔗 业财</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
@@ -299,7 +334,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
           </div>
           <div className="p-6 overflow-y-auto flex-1">
             {modalMode === 'delete' ? <div className="text-center py-4"><div className="text-4xl mb-3">⚠️</div><p className="text-slate-600 text-sm mb-4">确定要删除这条记录吗？此操作不可撤销（关联明细将按外键级联删除）。</p><div className="bg-slate-50 rounded-xl p-4 text-left max-w-md mx-auto border border-slate-100">{table.cols.slice(0, 4).map(c => <div key={c.name} className="flex justify-between py-1.5 text-xs"><span className="text-slate-500">{c.cnName}</span><span className="text-slate-800 font-medium">{String(formData[c.name] ?? '-')}</span></div>)}</div></div>
-            : <div className="space-y-3">{table.cols.map(c => { const k = c.name, l = c.cnName, t = c.type; const dict = dicts[k]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预览" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : dict ? <select value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"><option value="">-- 请选择{l} --</option>{dict.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}</select> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
+            : <div className="space-y-3">{table.cols.map(c => { const k = c.name, l = c.cnName, t = c.type; const dict = dicts[k]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预览" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : dict ? <select value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"><option value="">-- 请选择{l} --</option>{dict.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}</select> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : (tableKey === 'trade_goods_main' && k === 'product_code' && modalMode === 'add') ? <div className="flex gap-2 items-center"><input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input flex-1" placeholder="点右侧 ⚡ 按行业编码规则自动生成"/><select value={codeRule} onChange={e => setCodeRule(e.target.value)} className="erp-input w-40">{codeRules.map(r => <option key={r.rule_code} value={r.rule_code}>{r.prefix}* {r.rule_name}</option>)}</select><button type="button" onClick={genGoodsCode} className="erp-btn erp-btn-primary whitespace-nowrap">⚡ 生成编码</button></div> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
           </div>
           <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/50">
             <button onClick={closeModal} className="erp-btn erp-btn-ghost">取消</button>
@@ -318,6 +353,72 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
             <button onClick={() => setPreviewImg(null)} className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold text-white transition-colors">关闭 ✕</button>
           </div>
           <img src={previewImg} alt="全屏预览" className="max-w-full max-h-[82vh] rounded-2xl shadow-2xl object-contain border border-white/20 bg-white" />
+        </div>
+      </div>
+    )}
+
+    {/* 业财一体化联动全景弹窗 */}
+    {linkData && (
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[90] p-4 erp-modal-bg" onClick={() => setLinkData(null)}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] flex flex-col erp-modal-panel" onClick={e => e.stopPropagation()}>
+          <div className="px-6 py-4 border-b flex items-center justify-between bg-gradient-to-r from-teal-50 to-cyan-50 shrink-0">
+            <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">🔗 业财一体化联动全景 <span className="text-xs font-mono bg-white border border-teal-200 text-teal-700 px-2 py-0.5 rounded-md">{linkNo}</span></h3>
+            <button onClick={() => setLinkData(null)} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+          </div>
+          <div className="p-6 overflow-y-auto flex-1 space-y-5 text-sm">
+            {(() => {
+              const Sec = ({ title, icon, empty, children }: any) => (
+                <div>
+                  <p className="text-xs font-bold text-slate-500 mb-2 flex items-center gap-1.5">{icon} {title} {empty && <span className="text-slate-300 font-normal">（暂无联动记录）</span>}</p>
+                  {children}
+                </div>
+              );
+              const vch = linkData.vouchers || [], det = linkData.voucherDetails || [];
+              const rcv = linkData.receivables || [], pay = linkData.payables || [];
+              const sin = linkData.stockIn || [], sout = linkData.stockOut || [], bat = linkData.batches || [];
+              const money = (v: any) => Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const badge = (s: string) => <span className={`erp-badge ${statusBadgeClass('status', s, dicts)}`}>{s}</span>;
+              return (<>
+                <Sec title={`会计凭证（${vch.length} 张，业务发生自动联动记账）`} icon="📒" empty={vch.length === 0}>
+                  {vch.map((v: any) => (
+                    <div key={v.id} className="border border-slate-200 rounded-xl p-3 mb-2 bg-slate-50/60">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="font-mono text-xs font-semibold text-slate-700">{v.voucher_no}</span>
+                        <span className="flex items-center gap-2 text-xs text-slate-500">{String(v.voucher_date || '').slice(0, 10)} {badge(v.voucher_status)} <b className="text-slate-700 tabular-nums">¥{money(v.debit_total)}</b></span>
+                      </div>
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {det.filter((d: any) => d.voucher_no === v.voucher_no).map((d: any) => (
+                            <tr key={d.id} className="border-t border-slate-100">
+                              <td className="py-1 text-slate-500 w-16 font-mono">{d.subject_code}</td>
+                              <td className="py-1 text-slate-700">{d.subject_name}</td>
+                              <td className="py-1 text-right tabular-nums text-slate-600 w-24">{Number(d.debit_amount) > 0 ? money(d.debit_amount) : ''}</td>
+                              <td className="py-1 text-right tabular-nums text-slate-600 w-24">{Number(d.credit_amount) > 0 ? money(d.credit_amount) : ''}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </Sec>
+                <Sec title={`应收单（${rcv.length}）`} icon="💰" empty={rcv.length === 0}>
+                  {rcv.map((r: any) => <div key={r.id} className="flex items-center justify-between border border-amber-100 bg-amber-50/50 rounded-xl px-3 py-2 mb-1.5 text-xs"><span className="font-mono">{r.receivable_no}</span>{badge(r.status)}<span className="tabular-nums">总额 ¥{money(r.total_amount)} · 已收 ¥{money(r.received_amount)} · <b className="text-amber-700">余额 ¥{money(r.remain_amount)}</b></span></div>)}
+                </Sec>
+                <Sec title={`应付单（${pay.length}）`} icon="🧾" empty={pay.length === 0}>
+                  {pay.map((r: any) => <div key={r.id} className="flex items-center justify-between border border-violet-100 bg-violet-50/50 rounded-xl px-3 py-2 mb-1.5 text-xs"><span className="font-mono">{r.payable_no}</span>{badge(r.status)}<span className="tabular-nums">总额 ¥{money(r.total_amount)} · 已付 ¥{money(r.paid_amount)} · <b className="text-violet-700">余额 ¥{money(r.remain_amount)}</b></span></div>)}
+                </Sec>
+                <Sec title={`入库单（${sin.length}）/ 出库单（${sout.length}）`} icon="📦" empty={sin.length === 0 && sout.length === 0}>
+                  {[...sin.map((x: any) => ({ ...x, _t: '入库' })), ...sout.map((x: any) => ({ ...x, _t: '出库' }))].map((x: any) => (
+                    <div key={x._t + x.id} className="flex items-center justify-between border border-slate-200 rounded-xl px-3 py-2 mb-1.5 text-xs"><span className="font-mono">{x._t === '入库' ? x.in_no : x.out_no}</span>{badge(x.status)}<span className="tabular-nums text-slate-600">¥{money(x.total_amount)} · {String(x._t === '入库' ? x.in_date : x.out_date || '').slice(0, 10)}</span></div>
+                  ))}
+                </Sec>
+                <Sec title={`关联批次（${bat.length}）`} icon="🧬" empty={bat.length === 0}>
+                  {bat.map((b: any) => <div key={b.id} className="flex items-center justify-between border border-teal-100 bg-teal-50/40 rounded-xl px-3 py-2 mb-1.5 text-xs"><span className="font-mono">{b.batch_no}</span><span className="text-slate-500">{b.product_name}</span>{badge(b.status)}<span className="tabular-nums">入库 {Number(b.qty || 0)} / 剩余 {Number(b.remain_qty || 0)}</span></div>)}
+                </Sec>
+              </>);
+            })()}
+          </div>
+          <div className="px-6 py-3 border-t bg-slate-50/60 text-[11px] text-slate-400">业务单据发生后，凭证 / 应收应付 / 出入库 / 批次由后端事务自动联动生成，无需手工重复录入。</div>
         </div>
       </div>
     )}

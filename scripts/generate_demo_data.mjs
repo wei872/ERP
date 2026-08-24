@@ -63,36 +63,36 @@ const suppliers = [
   ['S-005', '佛山包装材料厂', '包装辅料', '冯丽', '13505555666', 'fengl@fsbz.example.com', '佛山市南海区狮山镇工业路6号'],
   ['S-006', '杭州测控技术公司', '传感元件', '蒋超', '13606666777', 'jiangc@hzck.example.com', '杭州市滨江区物联网街88号'],
 ];
-// code,name,cat,spec,unit,buy,sell
+// code,name,cat,spec,unit,buy,sell —— 行业编码规则（电子智造）：分类前缀+流水号
 const goods = [
   ['FG-001', '智能工业网关', '成品', 'GW-200/4G全网通', '台', 0, 1280],
   ['FG-002', '工业温湿度传感器', '成品', 'IS-500/RS485', '只', 0, 460],
   ['FG-003', '边缘计算控制主板', '成品', 'CB-8X/8核', '块', 0, 2350],
-  ['M-001', '主控芯片STM32F4', '原材料', 'LQFP-100', '片', 45, 68],
-  ['M-002', '4G通信模组', '原材料', 'CAT-1全网通', '个', 120, 168],
-  ['M-003', 'PCB四层主板', '原材料', '200x120mm', '块', 65, 92],
-  ['M-004', '工业电源模块', '原材料', '24V/2A', '个', 38, 55],
-  ['M-005', '铝合金外壳', '原材料', '阳极氧化', '件', 52, 75],
-  ['M-006', '3.5寸触控显示屏', '原材料', '800x480', '块', 85, 120],
-  ['M-007', '接线端子组件', '原材料', '5.08mm间距', '套', 6, 10],
-  ['M-008', '防震包装箱', '辅料', '五层瓦楞定制', '个', 4, 7],
-  ['M-009', '不锈钢螺丝包', '辅料', 'M3x8全套', '包', 2, 4],
-  ['M-010', '高精度温度探头', '原材料', 'PT100/A级', '支', 55, 80],
-  ['M-011', '湿度感应元件', '原材料', '电容式', '支', 32, 48],
-  ['M-012', '信号隔离器', '元器件', '4-20mA', '个', 28, 42],
+  ['IC-0001', '主控芯片STM32F4', '原材料', 'LQFP-100', '片', 45, 68],
+  ['MOD-0001', '4G通信模组', '原材料', 'CAT-1全网通', '个', 120, 168],
+  ['PCB-0001', 'PCB四层主板', '原材料', '200x120mm', '块', 65, 92],
+  ['PWR-0001', '工业电源模块', '原材料', '24V/2A', '个', 38, 55],
+  ['ENC-0001', '铝合金外壳', '原材料', '阳极氧化', '件', 52, 75],
+  ['DSP-0001', '3.5寸触控显示屏', '原材料', '800x480', '块', 85, 120],
+  ['CON-0001', '接线端子组件', '原材料', '5.08mm间距', '套', 6, 10],
+  ['PKG-0001', '防震包装箱', '辅料', '五层瓦楞定制', '个', 4, 7],
+  ['FST-0001', '不锈钢螺丝包', '辅料', 'M3x8全套', '包', 2, 4],
+  ['SEN-0001', '高精度温度探头', '原材料', 'PT100/A级', '支', 55, 80],
+  ['SEN-0002', '湿度感应元件', '原材料', '电容式', '支', 32, 48],
+  ['ISO-0001', '信号隔离器', '元器件', '4-20mA', '个', 28, 42],
 ];
 const gmap = Object.fromEntries(goods.map(g => [g[0], g]));
 const bom = {
-  'FG-001': [['M-001', 1], ['M-002', 1], ['M-003', 1], ['M-004', 1], ['M-005', 1], ['M-007', 4], ['M-008', 1], ['M-009', 2]],
-  'FG-002': [['M-001', 1], ['M-003', 1], ['M-004', 1], ['M-005', 1], ['M-010', 2], ['M-011', 1], ['M-008', 1], ['M-009', 1]],
-  'FG-003': [['M-001', 2], ['M-003', 2], ['M-004', 2], ['M-006', 1], ['M-007', 6], ['M-012', 2], ['M-009', 2]],
+  'FG-001': [['IC-0001', 1], ['MOD-0001', 1], ['PCB-0001', 1], ['PWR-0001', 1], ['ENC-0001', 1], ['CON-0001', 4], ['PKG-0001', 1], ['FST-0001', 2]],
+  'FG-002': [['IC-0001', 1], ['PCB-0001', 1], ['PWR-0001', 1], ['ENC-0001', 1], ['SEN-0001', 2], ['SEN-0002', 1], ['PKG-0001', 1], ['FST-0001', 1]],
+  'FG-003': [['IC-0001', 2], ['PCB-0001', 2], ['PWR-0001', 2], ['DSP-0001', 1], ['CON-0001', 6], ['ISO-0001', 2], ['FST-0001', 2]],
 };
 const fgCost = {};
 for (const [fg, lines] of Object.entries(bom)) {
   const mat = lines.reduce((s, [c, qy]) => s + gmap[c][5] * qy, 0);
   fgCost[fg] = Math.round((mat + 40) * 100) / 100; // 材料 + 人工制费40/台
 }
-const matSupplier = { 'M-001': 0, 'M-002': 0, 'M-003': 2, 'M-006': 2, 'M-010': 5, 'M-011': 5, 'M-012': 5, 'M-004': 3, 'M-005': 1, 'M-007': 1, 'M-009': 1, 'M-008': 4 };
+const matSupplier = { 'IC-0001': 0, 'MOD-0001': 0, 'PCB-0001': 2, 'DSP-0001': 2, 'SEN-0001': 5, 'SEN-0002': 5, 'ISO-0001': 5, 'PWR-0001': 3, 'ENC-0001': 1, 'CON-0001': 1, 'FST-0001': 1, 'PKG-0001': 4 };
 const salesPersons = ['张三', '周八', '王小明'];
 const workshops = ['一号车间', '二号车间'];
 
@@ -193,18 +193,51 @@ const invOut = (m, day, code, qty, ref) => {
   moves.push({ m, day, code, type: '出库', delta: qty, ref, cost: uc });
 };
 // 期初建账库存（8个月前的一次性建库采购，保证早期生产领料不断料）
-const initialStock = { 'M-001': 400, 'M-002': 200, 'M-003': 350, 'M-004': 300, 'M-005': 250, 'M-006': 120, 'M-007': 1200, 'M-008': 500, 'M-009': 900, 'M-010': 200, 'M-011': 150, 'M-012': 160 };
+const initialStock = { 'IC-0001': 400, 'MOD-0001': 200, 'PCB-0001': 350, 'PWR-0001': 300, 'ENC-0001': 250, 'DSP-0001': 120, 'CON-0001': 1200, 'PKG-0001': 500, 'FST-0001': 900, 'SEN-0001': 200, 'SEN-0002': 150, 'ISO-0001': 160 };
 for (const [c, qty] of Object.entries(initialStock)) invIn(8, 29, c, qty, gmap[c][5], '期初建库');
+// ── 批次仿真：与库存回放同节奏（采购批次 → FIFO领料 → 生产批次(成分回写) → 销售FIFO耗用） ──
+const batchRows = [];   // trade_batch_trace
+const batchConsumeRows = []; // trade_batch_consume
+const liveBatches = []; // {no, code, type, qty, remain, source_no, supplier_code, supplier_name, wo, components, m, day}
+const woComponents = {}; // woNo -> [batchNo]
+const fifoConsume = (code, qty, targetNo, targetType, m, compSet) => {
+  let need = qty;
+  for (const b of liveBatches) {
+    if (need <= 0) break;
+    if (b.code !== code || b.remain <= 0) continue;
+    const take = Math.min(b.remain, need);
+    b.remain -= take; need -= take;
+    batchConsumeRows.push({ batch_no: b.no, code, qty: take, targetNo, targetType, m });
+    if (compSet && !compSet.includes(b.no)) compSet.push(b.no);
+  }
+};
 // 按时间回放全部业务
 for (let m = 8; m >= 0; m--) {
-  for (const p of purchases.filter(x => x.m === m && x.status === '已入库'))
-    for (const l of p.lines) invIn(m, p.day, l.code, l.qty, l.price, p.no);
-  for (const r of requisitions.filter(x => x.m === m))
-    for (const l of r.lines) if (l.actual > 0) invOut(m, 15, l.code, l.actual, r.no);
-  for (const w of warehouseIns.filter(x => x.m === m)) invIn(m, w.day, w. fg, w.qty, fgCost[w.fg], w.no);
+  for (const p of purchases.filter(x => x.m === m && x.status === '已入库')) {
+    p.lines.forEach((l, i) => {
+      invIn(m, p.day, l.code, l.qty, l.price, p.no);
+      const bn = `PB-${p.no}-${i + 1}`;
+      liveBatches.push({ no: bn, code: l.code, type: '采购批次', qty: l.qty, remain: l.qty, source_no: p.no, supplier_code: suppliers[p.suppIdx][0], supplier_name: suppliers[p.suppIdx][1], wo: '', components: [], m, day: p.day + 2 });
+    });
+  }
+  for (const r of requisitions.filter(x => x.m === m)) {
+    woComponents[r.wo] = woComponents[r.wo] || [];
+    for (const l of r.lines) if (l.actual > 0) {
+      invOut(m, 15, l.code, l.actual, r.no);
+      fifoConsume(l.code, l.actual, r.wo, '生产领料', m, woComponents[r.wo]);
+    }
+  }
+  for (const w of warehouseIns.filter(x => x.m === m)) {
+    invIn(m, w.day, w.fg, w.qty, fgCost[w.fg], w.no);
+    liveBatches.push({ no: `MB-${w.wo}`, code: w.fg, type: '生产批次', qty: w.qty, remain: w.qty, source_no: w.wo, supplier_code: '', supplier_name: '', wo: w.wo, components: woComponents[w.wo] || [], m, day: w.day });
+  }
   for (const s of sales.filter(x => x.m === m && x.ship === '已出库'))
-    for (const l of s.lines) invOut(m, s.day, l.code, l.qty, s.no);
+    for (const l of s.lines) {
+      invOut(m, s.day, l.code, l.qty, s.no);
+      fifoConsume(l.code, l.qty, s.no, '销售出库', m, null);
+    }
 }
+for (const b of liveBatches) batchRows.push(b);
 
 // ══════════════════════ 凭证与科目余额 ══════════════════════
 const vouchers = []; // {m, day, no, remark, lines:[{code,name,dr,cr,summary}]}
@@ -418,7 +451,7 @@ insert('trade_stock_out_main', ['out_no', 'out_type', 'ref_no', 'customer_code',
 insert('trade_stock_out_detail', ['out_no', 'line_no', 'product_code', 'product_name', 'spec_model', 'qty', 'unit', 'unit_cost', 'amount', 'location'], outDetails);
 
 // ── 库存结存 + 流水 ──
-const alertSet = new Set(['M-008', 'M-009']);
+const alertSet = new Set(['PKG-0001', 'FST-0001']);
 insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model', 'warehouse', 'location', 'qty', 'unit_cost', 'total_value', 'min_stock', 'stock_status'],
   Object.entries(inv).filter(([, b]) => b.qty > 0).map(([code, b]) => {
     const uc = b.value / b.qty;
@@ -437,6 +470,12 @@ insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model',
   });
   insert('trade_stock_log', ['log_no', 'product_code', 'product_name', 'warehouse', 'change_type', 'before_qty', 'change_qty', 'after_qty', 'ref_no', 'operator', 'change_date'], logRows);
 }
+
+// ── 批次追溯台账 + 耗用记录（与出入库回放完全同步生成） ──
+insert('trade_batch_trace', ['batch_no', 'product_code', 'product_name', 'batch_type', 'qty', 'remain_qty', 'source_no', 'supplier_code', 'supplier_name', 'work_order_no', 'component_batches', 'in_date', 'status'],
+  batchRows.map(b => [q(b.no), q(b.code), q(gmap[b.code][1]), q(b.type), q4(b.qty), q4(b.remain), q(b.source_no), q(b.supplier_code), q(b.supplier_name), q(b.wo), q(JSON.stringify(b.components)), dAgo(b.m * 30 + b.day), q(b.remain <= 0 ? '已耗用' : '在库')]));
+insert('trade_batch_consume', ['batch_no', 'product_code', 'consume_qty', 'target_no', 'target_type', 'consume_date'],
+  batchConsumeRows.map(c => [q(c.batch_no), q(c.code), q4(c.qty), q(c.targetNo), q(c.targetType), dAgo(c.m * 30 + 15)]));
 
 // ── 生产 ──
 insert('prod_work_order', ['work_order_no', 'ref_plan_no', 'product_code', 'product_name', 'spec_model', 'plan_qty', 'actual_qty', 'complete_qty', 'scrap_qty', 'unit', 'workshop', 'leader', 'start_date', 'plan_end_date', 'order_status', 'priority'],

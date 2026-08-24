@@ -23,6 +23,7 @@ public class BizController {
     @Autowired private MrpService mrp;
     @Autowired private ExportService exportService;
     @Autowired private AuditService audit;
+    @Autowired private BatchService batchService;
     @Autowired private FinanceTemplateService fin;
     @Autowired private ReconciliationService reconciliation;
     @Autowired private FinanceService finance;
@@ -240,6 +241,60 @@ public class BizController {
             audit.log(user(req), "销售", "销售一键出库", "saleId="+id, audit.getIp(req));
             return Result.ok(r);
         } catch (Exception e) { return Result.error("销售出库联动失败: " + e.getMessage()); }
+    }
+
+    // ── 批次追溯：正向基因图谱 / 反向按销售单追溯 ──
+    @GetMapping("/batch-trace/{batchNo}") public Result batchTrace(@PathVariable String batchNo) {
+        try { return Result.ok(batchService.trace(batchNo)); }
+        catch (Exception e) { return Result.error("批次追溯失败: " + e.getMessage()); }
+    }
+    @GetMapping("/batch-trace-sale/{salesNo}") public Result batchTraceSale(@PathVariable String salesNo) {
+        try { return Result.ok(batchService.traceBySale(salesNo)); }
+        catch (Exception e) { return Result.error("追溯失败: " + e.getMessage()); }
+    }
+
+    // ── 物料编码规则（行业特色：电子智造 分类前缀+流水号） ──
+    @GetMapping("/code-rules") public Result codeRules() {
+        try { return Result.ok(db.queryForList("SELECT * FROM sys_code_rule ORDER BY id")); }
+        catch (Exception e) { return Result.error("编码规则加载失败（请先执行 database/upgrade3.sql）"); }
+    }
+    @GetMapping("/next-code/{ruleCode}") public Result nextCode(@PathVariable String ruleCode) {
+        try {
+            List<Map<String,Object>> rules = db.queryForList("SELECT * FROM sys_code_rule WHERE rule_code=?", ruleCode);
+            if (rules.isEmpty()) return Result.error("编码规则不存在: " + ruleCode);
+            Map<String,Object> rule = rules.get(0);
+            String prefix = String.valueOf(rule.get("prefix"));
+            int seqLen = rule.get("seq_length") == null ? 4 : ((Number)rule.get("seq_length")).intValue();
+            // 从现有编码扫描最大流水号（无需维护计数器，天然防重）
+            int maxSeq = 0;
+            List<Map<String,Object>> exist = db.queryForList("SELECT product_code FROM trade_goods_main WHERE product_code LIKE ?", prefix + "%");
+            for (Map<String,Object> r : exist) {
+                String code = String.valueOf(r.get("product_code"));
+                String tail = code.substring(prefix.length());
+                try { int n = Integer.parseInt(tail.trim()); if (n > maxSeq) maxSeq = n; } catch (Exception ignored) {}
+            }
+            String next = prefix + String.format("%0" + seqLen + "d", maxSeq + 1);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("code", next);
+            ret.put("rule_name", rule.get("rule_name"));
+            ret.put("description", rule.get("description"));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("生成编码失败: " + e.getMessage()); }
+    }
+
+    // ── 业财一体化：单据的财务联动全景（凭证/应收应付/出入库/批次） ──
+    @GetMapping("/doc-links/{no}") public Result docLinks(@PathVariable String no) {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("vouchers", db.queryForList("SELECT * FROM voucher_main WHERE remark LIKE ? ORDER BY id", "%" + no + "%"));
+            ret.put("voucherDetails", db.queryForList("SELECT d.* FROM voucher_detail d JOIN voucher_main m ON m.voucher_no=d.voucher_no WHERE m.remark LIKE ? ORDER BY m.id, d.line_no", "%" + no + "%"));
+            ret.put("receivables", db.queryForList("SELECT * FROM finance_receivable_main WHERE remark LIKE ?", "%" + no + "%"));
+            ret.put("payables", db.queryForList("SELECT * FROM finance_payable_main WHERE remark LIKE ?", "%" + no + "%"));
+            ret.put("stockIn", db.queryForList("SELECT * FROM trade_stock_in_main WHERE ref_no=?", no));
+            ret.put("stockOut", db.queryForList("SELECT * FROM trade_stock_out_main WHERE ref_no=?", no));
+            ret.put("batches", db.queryForList("SELECT * FROM trade_batch_trace WHERE source_no=?", no));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("联动查询失败: " + e.getMessage()); }
     }
 
     // ── 凭证 ──

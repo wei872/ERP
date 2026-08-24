@@ -7,9 +7,38 @@ function fmt(v: unknown): string { const n = Number(v); return Number.isFinite(n
 export default function InventoryClosingPage() {
   const { currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
-  const [tab, setTab] = useState<'stock' | 'close'>('stock');
+  const [tab, setTab] = useState<'stock' | 'close' | 'trace'>('stock');
   const [toast, setToast] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // 批次追溯
+  const [traceInput, setTraceInput] = useState('');
+  const [traceResult, setTraceResult] = useState<{ kind: 'batch' | 'sale'; data: any } | null>(null);
+  const [traceErr, setTraceErr] = useState('');
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [batchList, setBatchList] = useState<any[]>([]);
+
+  const runTrace = useCallback(async (input?: string) => {
+    const kw = (input ?? traceInput).trim();
+    if (!kw) { setTraceErr('请输入批次号（PB-/MB- 开头）或销售单号（SO- 开头）'); return; }
+    setTraceLoading(true); setTraceErr(''); setTraceResult(null);
+    try {
+      if (/^SO-/i.test(kw)) {
+        const r = await bizApi.batchTraceSale(kw);
+        setTraceResult({ kind: 'sale', data: r.data });
+      } else {
+        const r = await bizApi.batchTrace(kw);
+        setTraceResult({ kind: 'batch', data: r.data });
+      }
+    } catch (e: any) { setTraceErr(e.message || '追溯失败'); }
+    setTraceLoading(false);
+  }, [traceInput]);
+
+  useEffect(() => {
+    if (tab === 'trace') {
+      dataApi.list('trade_batch_trace', 1, 12, '').then(r => setBatchList(r.data?.rows || [])).catch(() => setBatchList([]));
+    }
+  }, [tab]);
 
   // 库存直调表单
   const [ioType, setIoType] = useState<'in' | 'out'>('in');
@@ -142,6 +171,7 @@ export default function InventoryClosingPage() {
             {loadingData ? '加载中...' : '↻ 刷新全景看板'}
           </button>
           <button onClick={()=>setTab('stock')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='stock'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>进销存直调与看板</button>
+          <button onClick={()=>setTab('trace')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='trace'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>🧬 批次追溯</button>
           <button onClick={()=>setTab('close')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='close'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>期末月结/年结</button>
         </div>
       </div>
@@ -393,6 +423,120 @@ export default function InventoryClosingPage() {
           </div>
 
           {closeResult && <div className="md:col-span-2 bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-sm text-emerald-800 font-medium">{closeResult}</div>}
+        </div>
+      )}
+
+      {tab === 'trace' && (
+        <div className="space-y-5 erp-fade-in">
+          {/* 追溯入口 */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+            <h3 className="text-sm font-bold text-slate-700 mb-1 flex items-center gap-2">🧬 批次全链路追溯</h3>
+            <p className="text-xs text-slate-400 mb-3">正向：批次 → 用在了哪些工单 / 卖给了哪些客户；反向：销售单 → 成品批次 → 原料批次 → 采购单/供应商（一键召回定位）</p>
+            <div className="flex gap-2">
+              <input className="input flex-1" placeholder="输入批次号（如 PB-PO-0001-1 / MB-WO-0001）或销售单号（如 SO-0001）" value={traceInput} onChange={e => setTraceInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && runTrace()} />
+              <button onClick={() => runTrace()} disabled={traceLoading} className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium disabled:opacity-60">{traceLoading ? '追溯中…' : '🔍 追溯'}</button>
+            </div>
+            {traceErr && <p className="text-xs text-red-500 mt-2">{traceErr}</p>}
+          </div>
+
+          {/* 追溯结果 */}
+          {traceResult?.kind === 'batch' && (() => {
+            const d = traceResult.data; const b = d.batch || {};
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800 flex items-center gap-2">批次 <span className="font-mono text-indigo-600">{b.batch_no}</span><span className="erp-badge bg-slate-100 text-slate-600">{b.batch_type}</span><span className={`erp-badge ${b.status === '在库' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{b.status}</span></h4>
+                  <span className="text-xs text-slate-500 tabular-nums">入库 {Number(b.qty || 0)} · 剩余 {Number(b.remain_qty || 0)} · {String(b.in_date || '').slice(0, 10)}</span>
+                </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-slate-100 p-4 bg-slate-50/50">
+                    <p className="text-xs font-bold text-slate-500 mb-2">⬆️ 上游来源</p>
+                    <p className="text-sm text-slate-700 mb-1">{b.product_name} <span className="font-mono text-xs text-slate-400">{b.product_code}</span></p>
+                    {d.sourcePurchase && <p className="text-xs text-slate-500">采购单 <span className="font-mono">{d.sourcePurchase.purchase_no}</span> · 供应商：{d.sourcePurchase.supplier_name} · {String(d.sourcePurchase.purchase_date || '').slice(0, 10)}</p>}
+                    {d.sourceWorkOrder && <p className="text-xs text-slate-500">生产工单 <span className="font-mono">{d.sourceWorkOrder.work_order_no}</span> · {d.sourceWorkOrder.workshop || ''} · 状态 {d.sourceWorkOrder.order_status}</p>}
+                    {(d.components || []).length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[11px] text-slate-400 font-medium">成分原料批次：</p>
+                        {d.components.map((c: any, i: number) => (
+                          <div key={i} className="flex items-center justify-between text-xs bg-white border border-slate-100 rounded-lg px-2.5 py-1.5">
+                            <button className="font-mono text-indigo-600 hover:underline" onClick={() => { setTraceInput(c.batch.batch_no); runTrace(c.batch.batch_no); }}>{c.batch.batch_no}</button>
+                            <span className="text-slate-500">{c.batch.product_name}</span>
+                            {c.sourcePurchase && <span className="text-slate-400">← {c.sourcePurchase.supplier_name}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-slate-100 p-4 bg-slate-50/50">
+                    <p className="text-xs font-bold text-slate-500 mb-2">⬇️ 下游流向（{(d.consumptions || []).length} 条耗用）</p>
+                    {(d.consumptions || []).length === 0 && <p className="text-xs text-slate-400">暂无耗用记录，全部在库</p>}
+                    <div className="space-y-1">
+                      {(d.consumptions || []).map((c: any) => (
+                        <div key={c.id} className="flex items-center justify-between text-xs bg-white border border-slate-100 rounded-lg px-2.5 py-1.5">
+                          <span className={`erp-badge ${c.target_type === '销售出库' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>{c.target_type}</span>
+                          {c.target_type === '销售出库'
+                            ? <button className="font-mono text-indigo-600 hover:underline" onClick={() => { setTraceInput(c.target_no); runTrace(c.target_no); }}>{c.target_no}</button>
+                            : <span className="font-mono text-slate-600">{c.target_no}</span>}
+                          <span className="tabular-nums text-slate-600">耗用 {Number(c.consume_qty || 0)} · {String(c.consume_date || '').slice(0, 10)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {traceResult?.kind === 'sale' && (() => {
+            const d = traceResult.data; const s = d.sale || {};
+            return (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                <h4 className="font-bold text-slate-800">销售单 <span className="font-mono text-indigo-600">{s.sales_no}</span> <span className="text-xs font-normal text-slate-500">→ {s.customer_name} · ¥{Number(s.total_amount || 0).toLocaleString()} · {String(s.sales_date || '').slice(0, 10)}</span></h4>
+                {(d.batches || []).length === 0 && <p className="text-xs text-slate-400">该销售单暂无批次耗用记录（早期单据或批次台账启用前的业务）</p>}
+                {(d.batches || []).map((bt: any, i: number) => (
+                  <div key={i} className="rounded-xl border border-slate-100 p-3.5 bg-slate-50/50">
+                    <div className="flex items-center justify-between mb-1">
+                      <button className="font-mono text-sm text-indigo-600 hover:underline" onClick={() => { setTraceInput(bt.batch_no); runTrace(bt.batch_no); }}>{bt.batch_no}</button>
+                      <span className="text-xs text-slate-500">{bt.batch_product_name} · 耗用 {Number(bt.consume_qty || 0)}</span>
+                    </div>
+                    {bt.batch_type === '生产批次' && (
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        {(bt.materials || []).map((mm: any, j: number) => (
+                          <button key={j} onClick={() => { setTraceInput(mm.batch_no); runTrace(mm.batch_no); }} className="text-[11px] bg-white border border-slate-200 rounded-md px-2 py-1 hover:border-indigo-300 hover:text-indigo-600 transition-colors" title={`来源：${mm.source_no || '-'}`}>
+                            {mm.product_name} <span className="font-mono text-slate-400">{mm.batch_no}</span>{mm.supplier_name && <span className="text-slate-400"> ← {mm.supplier_name}</span>}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {bt.batch_type === '采购批次' && bt.supplier_name && <p className="text-[11px] text-slate-400 mt-1">直采批次 · 供应商：{bt.supplier_name} · 采购单 {bt.source_no}</p>}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* 最近批次台账 */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+            <p className="text-xs font-bold text-slate-500 mb-3">最近批次台账（点击批次号追溯）</p>
+            {batchList.length === 0 ? <p className="text-xs text-slate-400">暂无批次数据 —— 采购入库 / 生产入库 / 演示数据装载后自动生成</p> : (
+              <table className="erp-table text-xs">
+                <thead><tr><th>批次号</th><th>物料/产品</th><th>类型</th><th>入库数</th><th>剩余</th><th>状态</th><th>入库日期</th></tr></thead>
+                <tbody>
+                  {batchList.map(b => (
+                    <tr key={b.id}>
+                      <td><button className="font-mono text-indigo-600 hover:underline" onClick={() => { setTraceInput(b.batch_no); runTrace(b.batch_no); }}>{b.batch_no}</button></td>
+                      <td>{b.product_name} <span className="text-slate-400 font-mono">{b.product_code}</span></td>
+                      <td>{b.batch_type}</td>
+                      <td className="tabular-nums">{Number(b.qty || 0)}</td>
+                      <td className="tabular-nums">{Number(b.remain_qty || 0)}</td>
+                      <td><span className={`erp-badge ${b.status === '在库' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{b.status}</span></td>
+                      <td className="text-slate-500">{String(b.in_date || '').slice(0, 10)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 

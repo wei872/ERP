@@ -17,6 +17,7 @@ public class InventoryService {
 
     @Autowired private JdbcTemplate db;
     @Autowired private FinanceService finance;
+    @Autowired private BatchService batch;
 
     /** ===== 库存唯一写入口：单据级应用 =====
      *  入库/出库主表 INSERT 后调用，按单号应用全部明细行。*/
@@ -178,6 +179,9 @@ public class InventoryService {
 
         db.update("UPDATE trade_purchase_main SET purchase_status='已入库', arrival_status='全部到货' WHERE id=?", purchaseId);
 
+        // 批次追溯：按明细生成采购批次（表不存在时静默降级，不阻断入库）
+        try { batch.createPurchaseBatches(purchaseNo); } catch (Exception e) { System.err.println("[batch] 采购批次创建跳过: " + e.getMessage()); }
+
         Map<String,Object> res = new HashMap<>();
         res.put("in_no", inNo);
         res.put("purchase_no", purchaseNo);
@@ -224,6 +228,9 @@ public class InventoryService {
         }
 
         db.update("UPDATE trade_sales_main SET shipping_status='已出库', sales_status='已完成' WHERE id=?", saleId);
+
+        // 批次追溯：FIFO 耗用成品批次，记录流向销售单（表不存在时静默降级）
+        try { batch.consumeForSale(salesNo); } catch (Exception e) { System.err.println("[batch] 销售批次耗用跳过: " + e.getMessage()); }
 
         // 自动结转销售成本会计凭证 (借: 6401 主营业务成本, 贷: 1405 库存商品)
         String cogsVoucherNo = "";

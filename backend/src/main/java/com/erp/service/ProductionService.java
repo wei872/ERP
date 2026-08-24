@@ -15,6 +15,7 @@ public class ProductionService {
     @Autowired private JdbcTemplate db;
     @Autowired private InventoryService inventory;
     @Autowired private FinanceService finance;
+    @Autowired private BatchService batch;
 
     /** 创建生产工单 → 自动 BOM 展算 → 生成领料单 */
     @Transactional
@@ -93,6 +94,9 @@ public class ProductionService {
 
         // 库存入库（按产品成本加权平均），流水关联生产入库单号
         inventory.stockIn(productCode, productName, specModel, warehouse == null ? "默认仓" : warehouse, "", actualInQty, unitCost, inNo);
+
+        // 批次追溯：生成生产批次并回写 FIFO 耗用的原料批次（表不存在时静默降级）
+        try { batch.createProductionBatch(workOrderNo, productCode, productName, actualInQty); } catch (Exception e) { System.err.println("[batch] 生产批次创建跳过: " + e.getMessage()); }
 
         // 更新工单完成量
         db.update("UPDATE prod_work_order SET actual_qty=actual_qty+?, complete_qty=complete_qty+? WHERE work_order_no=?",

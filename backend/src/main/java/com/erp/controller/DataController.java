@@ -27,7 +27,7 @@ public class DataController {
 
     @Autowired private JdbcTemplate db; @Autowired private DataSource ds;
     @Autowired private AuditService audit; @Autowired private FinanceService finance; @Autowired private InventoryService inventory;
-    @Autowired private MetaService meta;
+    @Autowired private MetaService meta; @Autowired private SummaryService summaryService;
 
     private static final Pattern VALID = Pattern.compile("^[a-z][a-z0-9_]{2,60}$");
     private static final Map<String, Set<String>> TABLE_ROLE_MAP = new LinkedHashMap<>();
@@ -163,6 +163,20 @@ public class DataController {
             return Result.error(e.getMessage());
         } catch (Exception e) {
             return Result.error("查询失败: " + e.getMessage());
+        }
+    }
+
+    /** 列表页汇总分析：汇总卡片 + 月度趋势 + 分布（列配置在服务端，无注入面） */
+    @GetMapping("/{table}/summary")
+    public Result summary(@PathVariable String table, HttpServletRequest req) {
+        try {
+            String t = safe(table);
+            if (!canRead(String.valueOf(req.getAttribute("role")), t)) return Result.error("权限不足");
+            return Result.ok(summaryService.summary(t));
+        } catch (IllegalArgumentException e) {
+            return Result.error(e.getMessage());
+        } catch (Exception e) {
+            return Result.error("汇总加载失败: " + e.getMessage());
         }
     }
 

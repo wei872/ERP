@@ -30,6 +30,7 @@ export const dataApi = {
   update: (t: string, id: number, d: Record<string, unknown>) => request(`/data/${t}/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   delete: (t: string, id: number) => request(`/data/${t}/${id}`, { method: 'DELETE' }),
   initDb: () => request('/data/init-db'),
+  summary: (t: string) => request<{ cards: any[]; trend?: { title: string; points: any[] }; groups?: { title: string; points: any[] } }>(`/data/${t}/summary`),
 };
 
 export const bizApi = {
@@ -54,6 +55,11 @@ export const bizApi = {
   stockOut: (body: Record<string, unknown>) => request('/biz/stock-out', { method: 'POST', body: JSON.stringify(body) }),
   stockInFromPurchase: (id: number) => request(`/biz/stock-in-from-purchase/${id}`, { method: 'POST' }),
   stockOutFromSale: (id: number) => request(`/biz/stock-out-from-sale/${id}`, { method: 'POST' }),
+  batchTrace: (batchNo: string) => request<any>(`/biz/batch-trace/${encodeURIComponent(batchNo)}`),
+  batchTraceSale: (salesNo: string) => request<any>(`/biz/batch-trace-sale/${encodeURIComponent(salesNo)}`),
+  codeRules: () => request<any[]>('/biz/code-rules'),
+  nextCode: (ruleCode: string) => request<{ code: string; rule_name: string; description: string }>(`/biz/next-code/${encodeURIComponent(ruleCode)}`),
+  docLinks: (no: string) => request<any>(`/biz/doc-links/${encodeURIComponent(no)}`),
   createVoucher: (lines: any[], voucherWord = '记', period?: string) => request('/biz/voucher', { method: 'POST', body: JSON.stringify({ lines, voucher_word: voucherWord, period }) }),
   voucherFromSale: (id: number) => request(`/biz/finance/voucher-from-sale/${id}`, { method: 'POST' }),
   voucherFromPurchase: (id: number) => request(`/biz/finance/voucher-from-purchase/${id}`, { method: 'POST' }),

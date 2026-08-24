@@ -34,6 +34,75 @@ SET @s7 = IF(@c7=0, 'ALTER TABLE prod_bom_structure ADD COLUMN component_code VA
 SET @i1 = (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='prod_bom_structure' AND index_name='idx_pbs_parent');
 SET @si1 = IF(@i1=0, 'CREATE INDEX idx_pbs_parent ON prod_bom_structure(parent_code)', 'SELECT 1'); PREPARE sti1 FROM @si1; EXECUTE sti1; DEALLOCATE PREPARE sti1;
 
+-- ── 批次追溯：批次台账 + 耗用记录（正反向追溯的数据基座） ──
+CREATE TABLE IF NOT EXISTS trade_batch_trace (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  batch_no VARCHAR(50) COMMENT '批次号',
+  product_code VARCHAR(50) COMMENT '物料/产品编码',
+  product_name VARCHAR(100) COMMENT '名称',
+  batch_type VARCHAR(20) COMMENT '采购批次/生产批次',
+  qty DECIMAL(18,4) COMMENT '入库数量',
+  remain_qty DECIMAL(18,4) COMMENT '剩余数量',
+  source_no VARCHAR(50) COMMENT '来源单号（采购单/工单）',
+  supplier_code VARCHAR(50), supplier_name VARCHAR(100),
+  work_order_no VARCHAR(50),
+  component_batches TEXT COMMENT '生产批次耗用的原料批次(JSON数组)',
+  in_date DATE,
+  status VARCHAR(20) DEFAULT '在库',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS trade_batch_consume (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  batch_no VARCHAR(50) COMMENT '被耗用批次',
+  product_code VARCHAR(50),
+  consume_qty DECIMAL(18,4) COMMENT '耗用数量',
+  target_no VARCHAR(50) COMMENT '去向单号（销售单/工单）',
+  target_type VARCHAR(20) COMMENT '销售出库/生产领料',
+  consume_date DATE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 物料编码规则（行业特色：电子智造，分类前缀+流水号） ──
+CREATE TABLE IF NOT EXISTS sys_code_rule (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  rule_code VARCHAR(30) COMMENT '规则编码',
+  rule_name VARCHAR(50) COMMENT '规则名称',
+  prefix VARCHAR(20) COMMENT '编码前缀',
+  category VARCHAR(30) COMMENT '物料分类',
+  seq_length INT DEFAULT 4 COMMENT '流水号位数',
+  description VARCHAR(200),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_code_rule(rule_code, rule_name, prefix, category, seq_length, description) VALUES
+('FG',  '成品编码',     'FG-',  '成品',     3, '智能硬件成品：FG-001 智能工业网关'),
+('IC',  '芯片类',       'IC-',  '芯片',     4, '主控/存储芯片：IC-0001 主控芯片STM32F4'),
+('MOD', '模组类',       'MOD-', '通信模组', 4, '通信/功能模组：MOD-0001 4G通信模组'),
+('PCB', '电路板类',     'PCB-', '电路板',   4, 'PCB裸板/成品板：PCB-0001 PCB四层主板'),
+('PWR', '电源类',       'PWR-', '电源器件', 4, '电源模块/电池：PWR-0001 工业电源模块'),
+('ENC', '结构件类',     'ENC-', '结构件',   4, '外壳/散热/支架：ENC-0001 铝合金外壳'),
+('DSP', '显示类',       'DSP-', '显示器件', 4, '屏幕/指示灯：DSP-0001 3.5寸触控显示屏'),
+('CON', '连接件类',     'CON-', '连接器件', 4, '端子/线缆/插座：CON-0001 接线端子组件'),
+('SEN', '传感器类',     'SEN-', '传感元件', 4, '温度/湿度/压力：SEN-0001 高精度温度探头'),
+('ISO', '隔离器件类',   'ISO-', '隔离器件', 4, '隔离器/保护器：ISO-0001 信号隔离器'),
+('PKG', '包装辅料类',   'PKG-', '包装辅料', 4, '包装箱/标签：PKG-0001 防震包装箱'),
+('FST', '紧固件类',     'FST-', '紧固件',   4, '螺丝/螺母/垫片：FST-0001 不锈钢螺丝包');
+
+-- 批次/编码规则表注册进通用菜单与字典
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('trade_batch_trace','批次追溯台账','进销存管理','批次追溯',901),
+('trade_batch_consume','批次耗用记录','进销存管理','批次追溯',902),
+('sys_code_rule','物料编码规则','系统维护','编码规则',910);
+
+INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_no) VALUES
+('doc.status','在库','在库','green',36),
+('doc.status','已耗用','已耗用','gray',37);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('trade_batch_trace','status','doc.status');
+
 -- 状态列字典绑定补齐（前端彩色签 & 写入口校验）
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('trade_sales_main','shipping_status','doc.status');
