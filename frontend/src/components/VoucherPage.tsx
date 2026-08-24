@@ -2,6 +2,8 @@ import { toastNotify } from '../utils/toast';
 import { useState, lazy, Suspense } from 'react';
 import { bizApi } from '../api';
 
+const VoucherListPanel = lazy(() => import('./VoucherListPanel'));
+
 const SummaryPanel = lazy(() => import('./SummaryPanel'));
 
 type Line = { subject_code: string; subject_name: string; debit_amount: number; credit_amount: number; summary: string };
@@ -20,6 +22,7 @@ export default function VoucherPage() {
     { subject_code: '1002', subject_name: '银行存款', debit_amount: 0, credit_amount: 0, summary: '' },
   ]);
   const [saving, setSaving] = useState(false);
+  const [vtab, setVtab] = useState<'entry' | 'list'>('entry');
 
   // 从销售/采购单生成
   const [saleId, setSaleId] = useState('');
@@ -68,6 +71,15 @@ export default function VoucherPage() {
       {/* 凭证汇总卡片 + 分析图 */}
       <Suspense fallback={null}><SummaryPanel tableKey="voucher_main" /></Suspense>
 
+      {/* 录入 / 列表 双标签 */}
+      <div className="flex gap-2">
+        <button onClick={() => setVtab('entry')} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${vtab === 'entry' ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-500 hover:border-indigo-300'}`}>✍️ 手工录凭证</button>
+        <button onClick={() => setVtab('list')} className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${vtab === 'list' ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-500 hover:border-indigo-300'}`}>📋 凭证列表与审核</button>
+      </div>
+
+      {vtab === 'list' && <Suspense fallback={<div className="py-12 text-center text-sm text-slate-400"><div className="erp-spinner mx-auto mb-2"></div>加载中...</div>}><VoucherListPanel /></Suspense>}
+
+      {vtab === 'entry' && (<>
       {/* UI 引导与数据联动说明 */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
         <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
@@ -179,6 +191,7 @@ export default function VoucherPage() {
           </div>
         </div>
       </div>
+      </>)}
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { useTableMeta, statusBadgeClass } from '../meta/store';
 
 const SummaryPanel = lazy(() => import('./SummaryPanel'));
 const DetailDrilldown = lazy(() => import('./DetailDrilldown'));
+const DocPrintModal = lazy(() => import('./DocPrintModal'));
+import { downloadCsv } from '../utils/csv';
 
 /** 主单 → 明细钻取配置：单据行一键展开明细（复用后端搜索按关联键检索） */
 const DRILL_CFG: Record<string, { detail: string; key: string; label: string }> = {
@@ -55,6 +57,23 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const [linkNo, setLinkNo] = useState('');
   // 主单明细钻取
   const [drillKey, setDrillKey] = useState('');
+  // 单据套打
+  const [printRow, setPrintRow] = useState<Record<string, any> | null>(null);
+  // Excel 批量导入（商品/客户）
+  const importRef = useRef<HTMLInputElement>(null);
+  const IMPORT_CFG: Record<string, { type: string; label: string; template: (string | number)[][] }> = {
+    trade_goods_main: { type: 'goods', label: '商品', template: [['商品编码', '商品名称', '分类', '规格型号', '单位', '采购价', '销售价'], ['FG-100', '示例商品', '成品', '规格A', '台', 100, 150]] },
+    cust_customer_main: { type: 'customers', label: '客户', template: [['客户编码', '客户名称', '客户类型', '行业', '区域', '联系人', '联系电话'], ['C-100', '示例客户', '企业客户', '制造业', '华东', '张先生', '13800000000']] },
+  };
+  const doImport = async (file: File) => {
+    const cfg = IMPORT_CFG[tableKey];
+    if (!cfg) return;
+    try {
+      const r = await bizApi.importExcel(cfg.type, file);
+      toastNotify(`导入完成：成功 ${r.data.imported} 条，跳过 ${r.data.skipped} 条${r.data.errors?.length ? '；' + r.data.errors.join('；') : ''}`, r.data.errors?.length ? 'warn' : 'success');
+      fetchData(currentPage, search, sortCol, sortDir);
+    } catch (e: any) { toastNotify('导入失败：' + (e.message || ''), 'error'); }
+  };
   // 常用表收藏
   const [fav, setFav] = useState(false);
   useEffect(() => {
@@ -96,7 +115,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   };
   // Esc 关闭弹窗
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeModal(); setLinkData(null); setPreviewImg(null); setColPickerOpen(false); setDrillKey(''); } };
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') { closeModal(); setLinkData(null); setPreviewImg(null); setColPickerOpen(false); setDrillKey(''); setPrintRow(null); } };
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
   }, []);
@@ -339,6 +358,12 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
           <input type="text" value={search} onChange={e => doSearch(e.target.value)} placeholder="搜索..." className="erp-input pl-9 w-56"/>
         </div>
         <button onClick={() => bizApi.exportTableCsv(tableKey).catch(e => toastFn('导出失败: ' + e.message))} className="erp-btn erp-btn-ghost" title="导出 CSV">⬇ CSV</button>
+        {/* Excel 批量导入（商品/客户） */}
+        {IMPORT_CFG[tableKey] && (<>
+          <button onClick={() => importRef.current?.click()} className="erp-btn erp-btn-ghost" title="Excel 批量导入（按模板格式）">⬆ 导入</button>
+          <button onClick={() => downloadCsv(`${IMPORT_CFG[tableKey].label}导入模板.csv`, IMPORT_CFG[tableKey].template)} className="erp-btn erp-btn-ghost" title="下载导入模板">⬇ 模板</button>
+          <input ref={importRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) doImport(f); e.target.value = ''; }} />
+        </>)}
         {/* 列显示自定义 */}
         <div className="relative">
           <button onClick={() => setColPickerOpen(o => !o)} className="erp-btn erp-btn-ghost" title="自定义显示列">⚙ 列</button>
@@ -391,6 +416,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
                 <div className="flex items-center justify-center gap-1.5">
                   {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => openDocLinks(String((row as any)[tableKey === 'trade_sales_main' ? 'sales_no' : 'purchase_no']))} className="px-2.5 py-1 text-[11px] text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-md transition-colors font-medium">🔗 业财</button>}
                   {DRILL_CFG[tableKey] && <button onClick={() => setDrillKey(String((row as any)[DRILL_CFG[tableKey].key] ?? ''))} className="px-2.5 py-1 text-[11px] text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-md transition-colors font-medium">📄 明细</button>}
+                  {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => setPrintRow(row as any)} className="px-2.5 py-1 text-[11px] text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors font-medium">🖨️ 打印</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
@@ -533,6 +559,13 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
           <div className="px-6 py-3 border-t bg-slate-50/60 text-[11px] text-slate-400">明细行由业务录入/自动联动生成；主单金额 = 全部明细行金额之和（修改明细会自动重算主单）。</div>
         </div>
       </div>
+    )}
+
+    {/* 单据套打弹窗 */}
+    {printRow && (
+      <Suspense fallback={null}>
+        <DocPrintModal kind={tableKey === 'trade_sales_main' ? 'sales' : 'purchase'} mainRow={printRow} onClose={() => setPrintRow(null)} />
+      </Suspense>
     )}
   </div>);
 }

@@ -47,6 +47,10 @@ body { margin: 0; background: #f8fafc; color: #1e293b; letter-spacing: -0.005em;
   main { overflow: visible !important; height: auto !important; }
   .erp-card { box-shadow: none !important; border: 1px solid #e2e8f0; break-inside: avoid; }
   .erp-fade-in { animation: none !important; }
+  /* 单据套打：页面上存在 .print-area 时，只打印该区域 */
+  body:has(.print-area) * { visibility: hidden !important; }
+  body:has(.print-area) .print-area, body:has(.print-area) .print-area * { visibility: visible !important; }
+  body:has(.print-area) .print-area { position: fixed; inset: 0; overflow: visible; background: #fff; padding: 28px; }
 }
 
 /* ── 数字等宽 ── */

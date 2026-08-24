@@ -82,7 +82,8 @@ public class FinanceService {
             updateBalance(code, name, d, c);
         }
         if (debitTotal.compareTo(creditTotal) != 0) throw new RuntimeException("借贷不平: 借方=" + debitTotal + " 贷方=" + creditTotal);
-        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,?,CURDATE(),?,?,?,?,'已审核')",
+        // 手工凭证进入审核流：待审核 → 已审核 → 已记账（自动联动凭证由系统直接置已审核）
+        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,?,CURDATE(),?,?,?,?,'待审核')",
             vn, voucherWord == null ? "记" : voucherWord, period == null ? new SimpleDateFormat("yyyy-MM").format(new Date()) : period, debitTotal, creditTotal, preparedBy == null ? "系统" : preparedBy);
         for (Object[] d : detailBatch) {
             db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,?,?,?,?,?,?)", d);

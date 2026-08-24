@@ -395,6 +395,144 @@ public class BizController {
         return m;
     }
 
+    // ── 凭证审核流：待审核 → 已审核 → 已记账 ──
+    @PostMapping("/voucher-audit/{no}") public Result voucherAudit(@PathVariable String no, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT voucher_status FROM voucher_main WHERE voucher_no=?", no);
+            if (rows.isEmpty()) return Result.error("凭证不存在: " + no);
+            String st = String.valueOf(rows.get(0).get("voucher_status"));
+            if (!"待审核".equals(st)) return Result.error("仅「待审核」凭证可审核，当前状态：" + st);
+            db.update("UPDATE voucher_main SET voucher_status='已审核', reviewer=? WHERE voucher_no=?", user(req), no);
+            audit.log(user(req), "财务", "凭证审核", no, audit.getIp(req));
+            return Result.ok("已审核");
+        } catch (Exception e) { return Result.error("审核失败: " + e.getMessage()); }
+    }
+    @PostMapping("/voucher-post/{no}") public Result voucherPost(@PathVariable String no, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT voucher_status FROM voucher_main WHERE voucher_no=?", no);
+            if (rows.isEmpty()) return Result.error("凭证不存在: " + no);
+            String st = String.valueOf(rows.get(0).get("voucher_status"));
+            if (!"已审核".equals(st)) return Result.error("仅「已审核」凭证可记账，当前状态：" + st);
+            db.update("UPDATE voucher_main SET voucher_status='已记账' WHERE voucher_no=?", no);
+            audit.log(user(req), "财务", "凭证记账", no, audit.getIp(req));
+            return Result.ok("已记账");
+        } catch (Exception e) { return Result.error("记账失败: " + e.getMessage()); }
+    }
+
+    // ── Excel 批量导入（商品 / 客户） ──
+    @PostMapping("/import/{type}")
+    public Result importExcel(@PathVariable String type, @RequestParam("file") MultipartFile file, HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        if (file == null || file.isEmpty()) return Result.error("请上传文件");
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        if (!name.endsWith(".xlsx") && !name.endsWith(".xls")) return Result.error("仅支持 .xlsx / .xls 文件");
+        try (org.apache.poi.ss.usermodel.Workbook wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(file.getInputStream())) {
+            org.apache.poi.ss.usermodel.Sheet sh = wb.getSheetAt(0);
+            if (sh == null || sh.getLastRowNum() < 1) return Result.error("工作表为空（第 1 行须为表头，第 2 行起为数据）");
+            // 表头 → 列号映射（按中文表头，兼容顺序变化）
+            Map<String, Integer> head = new LinkedHashMap<>();
+            org.apache.poi.ss.usermodel.Row hr = sh.getRow(0);
+            if (hr != null) for (int c = 0; c < hr.getLastCellNum(); c++) {
+                String v = cellStr(hr.getCell(c)).trim();
+                if (!v.isEmpty()) head.put(v, c);
+            }
+            org.apache.poi.ss.usermodel.DataFormatter fmt = new org.apache.poi.ss.usermodel.DataFormatter();
+            int imported = 0, skipped = 0;
+            List<String> errors = new ArrayList<>();
+            for (int r = 1; r <= sh.getLastRowNum(); r++) {
+                org.apache.poi.ss.usermodel.Row row = sh.getRow(r);
+                if (row == null) continue;
+                try {
+                    if ("goods".equals(type)) {
+                        String code = cellAt(row, head, "商品编码", fmt).trim();
+                        if (code.isEmpty()) { skipped++; continue; }
+                        db.update("INSERT INTO trade_goods_main(product_code,product_name,category,spec_model,unit,purchase_price,sale_price,status) VALUES(?,?,?,?,?,?,?,'启用') " +
+                            "ON DUPLICATE KEY UPDATE product_name=VALUES(product_name), category=VALUES(category), spec_model=VALUES(spec_model), unit=VALUES(unit), purchase_price=VALUES(purchase_price), sale_price=VALUES(sale_price)",
+                            code, cellAt(row, head, "商品名称", fmt), cellAt(row, head, "分类", fmt), cellAt(row, head, "规格型号", fmt),
+                            cellAt(row, head, "单位", fmt), cellNum(row, head, "采购价", fmt), cellNum(row, head, "销售价", fmt));
+                        imported++;
+                    } else if ("customers".equals(type)) {
+                        String code = cellAt(row, head, "客户编码", fmt).trim();
+                        if (code.isEmpty()) { skipped++; continue; }
+                        db.update("INSERT INTO cust_customer_main(customer_code,customer_name,customer_type,industry,region,contact_person,contact_phone,level,status) VALUES(?,?,?,?,?,?,?,'普通客户','启用') " +
+                            "ON DUPLICATE KEY UPDATE customer_name=VALUES(customer_name), customer_type=VALUES(customer_type), industry=VALUES(industry), region=VALUES(region), contact_person=VALUES(contact_person), contact_phone=VALUES(contact_phone)",
+                            code, cellAt(row, head, "客户名称", fmt), cellAt(row, head, "客户类型", fmt), cellAt(row, head, "行业", fmt),
+                            cellAt(row, head, "区域", fmt), cellAt(row, head, "联系人", fmt), cellAt(row, head, "联系电话", fmt));
+                        imported++;
+                    } else {
+                        return Result.error("不支持的导入类型: " + type);
+                    }
+                } catch (Exception e) {
+                    if (errors.size() < 5) errors.add("第 " + (r + 1) + " 行: " + e.getMessage());
+                }
+            }
+            audit.log(user(req), "数据", "批量导入", type + " 成功" + imported + "/跳过" + skipped, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("imported", imported);
+            ret.put("skipped", skipped);
+            ret.put("errors", errors);
+            return Result.ok(ret);
+        } catch (Exception e) {
+            return Result.error("导入失败: " + e.getMessage());
+        }
+    }
+
+    private String cellStr(org.apache.poi.ss.usermodel.Cell c) {
+        if (c == null) return "";
+        switch (c.getCellType()) {
+            case STRING: return c.getStringCellValue();
+            case NUMERIC: return java.math.BigDecimal.valueOf(c.getNumericCellValue()).stripTrailingZeros().toPlainString();
+            case BOOLEAN: return String.valueOf(c.getBooleanCellValue());
+            default: return "";
+        }
+    }
+    private String cellAt(org.apache.poi.ss.usermodel.Row row, Map<String, Integer> head, String colName, org.apache.poi.ss.usermodel.DataFormatter fmt) {
+        Integer idx = head.get(colName);
+        if (idx == null) return "";
+        org.apache.poi.ss.usermodel.Cell c = row.getCell(idx);
+        return c == null ? "" : fmt.formatCellValue(c).trim();
+    }
+    private java.math.BigDecimal cellNum(org.apache.poi.ss.usermodel.Row row, Map<String, Integer> head, String colName, org.apache.poi.ss.usermodel.DataFormatter fmt) {
+        String v = cellAt(row, head, colName, fmt).replace(",", "");
+        if (v.isEmpty()) return java.math.BigDecimal.ZERO;
+        try { return new java.math.BigDecimal(v); } catch (Exception e) { return java.math.BigDecimal.ZERO; }
+    }
+
+    // ── 经营日报：今日业务全景聚合 ──
+    @GetMapping("/daily-report") public Result dailyReport() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            Map<String,Object> today = new LinkedHashMap<>();
+            today.put("salesCount", db.queryForObject("SELECT COUNT(*) FROM trade_sales_main WHERE DATE(sales_date)=CURDATE()", Long.class));
+            today.put("salesAmount", db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_sales_main WHERE DATE(sales_date)=CURDATE()", java.math.BigDecimal.class));
+            today.put("purchaseCount", db.queryForObject("SELECT COUNT(*) FROM trade_purchase_main WHERE DATE(purchase_date)=CURDATE()", Long.class));
+            today.put("purchaseAmount", db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_purchase_main WHERE DATE(purchase_date)=CURDATE()", java.math.BigDecimal.class));
+            today.put("stockIn", db.queryForObject("SELECT COUNT(*) FROM trade_stock_in_main WHERE DATE(in_date)=CURDATE()", Long.class));
+            today.put("stockOut", db.queryForObject("SELECT COUNT(*) FROM trade_stock_out_main WHERE DATE(out_date)=CURDATE()", Long.class));
+            today.put("vouchers", db.queryForObject("SELECT COUNT(*) FROM voucher_main WHERE DATE(voucher_date)=CURDATE()", Long.class));
+            today.put("approvals", db.queryForObject("SELECT COUNT(*) FROM oa_approval_main WHERE DATE(submit_date)=CURDATE()", Long.class));
+            today.put("logins", db.queryForObject("SELECT COUNT(*) FROM sys_login_log WHERE DATE(login_time)=CURDATE() AND login_status='成功'", Long.class));
+            today.put("loginFails", db.queryForObject("SELECT COUNT(*) FROM sys_login_log WHERE DATE(login_time)=CURDATE() AND login_status LIKE '失败%'", Long.class));
+            ret.put("today", today);
+            Map<String,Object> month = new LinkedHashMap<>();
+            month.put("salesAmount", db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_sales_main WHERE DATE_FORMAT(sales_date,'%Y-%m')=DATE_FORMAT(CURDATE(),'%Y-%m')", java.math.BigDecimal.class));
+            month.put("purchaseAmount", db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_purchase_main WHERE DATE_FORMAT(purchase_date,'%Y-%m')=DATE_FORMAT(CURDATE(),'%Y-%m')", java.math.BigDecimal.class));
+            month.put("vouchers", db.queryForObject("SELECT COUNT(*) FROM voucher_main WHERE DATE_FORMAT(voucher_date,'%Y-%m')=DATE_FORMAT(CURDATE(),'%Y-%m')", Long.class));
+            ret.put("month", month);
+            Map<String,Object> alerts = new LinkedHashMap<>();
+            alerts.put("lowStock", db.queryForObject("SELECT COUNT(*) FROM trade_inventory_balance WHERE stock_status='预警'", Long.class));
+            alerts.put("overdueReceivable", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
+            alerts.put("overduePayable", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_payable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
+            alerts.put("pendingApprovals", db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理'", Long.class));
+            ret.put("alerts", alerts);
+            ret.put("recentSales", db.queryForList("SELECT sales_no, customer_name, total_amount, sales_status FROM trade_sales_main ORDER BY id DESC LIMIT 5"));
+            ret.put("recentApprovals", db.queryForList("SELECT approval_no, approval_type, applicant, amount, approval_status FROM oa_approval_main ORDER BY id DESC LIMIT 5"));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("日报加载失败: " + e.getMessage()); }
+    }
+
     // ── 销售毛利分析 + 安全库存补货建议 ──
     @GetMapping("/profit-analysis") public Result profitAnalysis() {
         try { return Result.ok(report.profitAnalysis()); }

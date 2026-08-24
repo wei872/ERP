@@ -69,6 +69,18 @@ export const bizApi = {
   todos: () => request<any>('/biz/todos'),
   profitAnalysis: () => request<any>('/biz/profit-analysis'),
   replenish: () => request<any[]>('/biz/replenish'),
+  voucherAudit: (no: string) => request(`/biz/voucher-audit/${encodeURIComponent(no)}`, { method: 'POST' }),
+  voucherPost: (no: string) => request(`/biz/voucher-post/${encodeURIComponent(no)}`, { method: 'POST' }),
+  dailyReport: () => request<any>('/biz/daily-report'),
+  importExcel: async (type: string, file: File) => {
+    const token = localStorage.getItem('erp_token');
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/biz/import/${type}`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message || '导入失败');
+    return json;
+  },
   createVoucher: (lines: any[], voucherWord = '记', period?: string) => request('/biz/voucher', { method: 'POST', body: JSON.stringify({ lines, voucher_word: voucherWord, period }) }),
   voucherFromSale: (id: number) => request(`/biz/finance/voucher-from-sale/${id}`, { method: 'POST' }),
   voucherFromPurchase: (id: number) => request(`/biz/finance/voucher-from-purchase/${id}`, { method: 'POST' }),

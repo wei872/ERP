@@ -117,7 +117,8 @@ INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, s
 
 INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_no) VALUES
 ('doc.status','在库','在库','green',36),
-('doc.status','已耗用','已耗用','gray',37);
+('doc.status','已耗用','已耗用','gray',37),
+('doc.status','已记账','已记账','blue',38);
 
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('trade_batch_trace','status','doc.status');
