@@ -52,8 +52,11 @@ docker compose logs -f backend    # 跟踪后端日志
 访问 `http://<服务器IP>:8081`（端口可在 `.env` 用 `PORT` 修改），用
 `admin` + 你设置的 `SEED_ADMIN_PASSWORD` 登录。
 
-> ⚠️ 首次启动时，MySQL 容器会自动执行 `database/` 下 4 个初始化脚本（仅当数据卷为空时）。
-> 演示账号（zhangsan 等）默认**不创建**（`SEED_DEMO_USERS=false`）；如需演示账号可将其改为 `true`。
+> ⚠️ 首次启动时，MySQL 容器会自动执行 `database/` 下 5 个初始化脚本（仅当数据卷为空时），
+> 并按 `SEED_DEMO_DATA`（默认 true）装载 9 个月跨度的自洽演示业务数据 ——
+> 登录后仪表盘/报表/工作流/财务页面即有完整直观的数据，便于评估与培训。
+> **正式接入真实业务前**，请在 `.env` 中把 `SEED_DEMO_USERS` 与 `SEED_DEMO_DATA` 都改为 `false`
+> 并重建（已有业务数据的库永远不会被演示数据覆盖）。
 
 ### 2.3 升级
 
@@ -69,11 +72,15 @@ docker compose up -d --build      # 数据在命名卷中，升级不影响业�
 ### 3.1 数据库
 
 ```bash
-# MySQL 8.0，utf8mb4。按顺序执行（顺序敏感）：
-mysql -uroot -p < database/init.sql
-mysql -uroot -p < database/upgrade.sql
-mysql -uroot -p < database/upgrade2.sql
-mysql -uroot -p < database/registry_seed.sql
+# MySQL 8.0，utf8mb4。按顺序执行（顺序敏感，脚本均幂等可重跑）：
+mysql -uroot -p < database/init.sql            # 基础表
+mysql -uroot -p < database/upgrade.sql         # 扩展表/工作流
+mysql -uroot -p < database/upgrade2.sql        # 字典/唯一键/外键
+mysql -uroot -p < database/registry_seed.sql   # 表注册种子
+mysql -uroot -p < database/upgrade3.sql        # v5.2 列补丁（BOM父子件等）
+
+# 可选：手工装载演示数据（后端首次启动也会在业务表为空时自动装载）
+mysql -uroot -p erp_system < backend/src/main/resources/demo-data/demo_data.sql
 ```
 
 ### 3.2 后端
@@ -110,7 +117,7 @@ npm run build          # 产物在 dist/
 | 1 | `JWT_SECRET` | 强随机串 ≥32 字符；`APP_ENV=prod` 时后端会拒绝默认密钥启动 |
 | 2 | `MYSQL_PASSWORD` | 强密码；3306 端口不对公网开放（compose 默认不映射） |
 | 3 | `SEED_ADMIN_PASSWORD` | 登录后立即在「用户管理」再次修改管理员密码 |
-| 4 | `SEED_DEMO_USERS` | 生产保持 `false`，不创建演示账号 |
+| 4 | `SEED_DEMO_USERS` / `SEED_DEMO_DATA` | 正式生产建议均设 `false`（演示账号 + 演示业务数据） |
 | 5 | HTTPS | 在 nginx 前加反向代理（或云负载均衡）终结 TLS；本系统 Cookie 走 Authorization 头，仍需 TLS 防嗅探 |
 | 6 | 防火墙 | 仅放行 80/443；后端 8080 与数据库 3306 仅限内网 |
 | 7 | 备份 | 按第 5 节配置每日备份 |
@@ -139,6 +146,7 @@ gunzip -c erp_2026-01-01.sql.gz | docker exec -i erp-db sh -c 'exec mysql -uroot
 | `JWT_SECRET` | 仅开发占位 | 签名密钥，生产必填 |
 | `JWT_EXPIRATION` | `86400000` | Token 有效期（毫秒） |
 | `SEED_DEMO_USERS` | `true` | 是否播种演示账号 |
+| `SEED_DEMO_DATA` | `true` | 业务表为空时装载 9 个月自洽演示数据；生产设 `false` |
 | `SEED_ADMIN_PASSWORD` | 空（用 admin123） | admin 首次创建时的初始密码 |
 | `CORS_ALLOWED_ORIGINS` | 本地开发端口 | 跨域白名单，逗号分隔 |
 | `SERVER_PORT` | `8080` | 后端监听端口 |

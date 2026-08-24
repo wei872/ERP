@@ -155,18 +155,19 @@ public class InventoryService {
 
         String inNo = "IN-PO-" + System.currentTimeMillis();
         BigDecimal totalAmt = new BigDecimal(po.getOrDefault("total_amount", "0").toString());
-        db.update("INSERT INTO trade_stock_in_main(in_no,ref_purchase_no,supplier_code,supplier_name,warehouse,in_date,total_amount,status,handler) VALUES(?,?,?,?,?,CURDATE(),?,'已入库',?)",
-            inNo, purchaseNo, po.getOrDefault("supplier_code",""), po.getOrDefault("supplier_name",""), warehouse, totalAmt, operator == null ? "系统" : operator);
+        db.update("INSERT INTO trade_stock_in_main(in_no,in_type,ref_no,supplier_code,warehouse,in_date,total_amount,status,handler) VALUES(?,'采购入库',?,?,?,CURDATE(),?,'已入库',?)",
+            inNo, purchaseNo, po.getOrDefault("supplier_code",""), warehouse, totalAmt, operator == null ? "系统" : operator);
 
         if (!details.isEmpty()) {
+            int lineNo = 0;
             for (Map<String,Object> d : details) {
                 String pCode = String.valueOf(d.get("product_code"));
                 String pName = String.valueOf(d.getOrDefault("product_name", pCode));
                 String spec = String.valueOf(d.getOrDefault("spec_model", ""));
                 BigDecimal qty = new BigDecimal(d.getOrDefault("qty", "1").toString());
                 BigDecimal price = new BigDecimal(d.getOrDefault("unit_price", "0").toString());
-                db.update("INSERT INTO trade_stock_in_detail(in_no,product_code,product_name,spec_model,qty,unit_cost,total_amount) VALUES(?,?,?,?,?,?,?)",
-                    inNo, pCode, pName, spec, qty, price, qty.multiply(price));
+                db.update("INSERT INTO trade_stock_in_detail(in_no,line_no,product_code,product_name,spec_model,qty,unit_cost,amount) VALUES(?,?,?,?,?,?,?,?)",
+                    inNo, ++lineNo, pCode, pName, spec, qty, price, qty.multiply(price));
                 stockIn(pCode, pName, spec, warehouse, "", qty, price, purchaseNo);
                 db.update("UPDATE trade_goods_main SET unit_cost=?, purchase_price=? WHERE product_code=?", price, price, pCode);
             }
@@ -197,11 +198,12 @@ public class InventoryService {
 
         String outNo = "OUT-SO-" + System.currentTimeMillis();
         BigDecimal totalSalesAmt = new BigDecimal(sale.getOrDefault("total_amount", "0").toString());
-        db.update("INSERT INTO trade_stock_out_main(out_no,ref_sales_no,customer_code,customer_name,warehouse,out_date,total_amount,status,handler) VALUES(?,?,?,?,?,CURDATE(),?,'已出库',?)",
-            outNo, salesNo, sale.getOrDefault("customer_code",""), sale.getOrDefault("customer_name",""), warehouse, totalSalesAmt, operator == null ? "系统" : operator);
+        db.update("INSERT INTO trade_stock_out_main(out_no,out_type,ref_no,customer_code,warehouse,out_date,total_amount,status,handler) VALUES(?,'销售出库',?,?,?,CURDATE(),?,'已出库',?)",
+            outNo, salesNo, sale.getOrDefault("customer_code",""), warehouse, totalSalesAmt, operator == null ? "系统" : operator);
 
         BigDecimal cogsTotal = BigDecimal.ZERO;
         if (!details.isEmpty()) {
+            int lineNo = 0;
             for (Map<String,Object> d : details) {
                 String pCode = String.valueOf(d.get("product_code"));
                 String pName = String.valueOf(d.getOrDefault("product_name", pCode));
@@ -216,8 +218,8 @@ public class InventoryService {
                 }
                 BigDecimal lineCost = qty.multiply(unitCost).setScale(2, RoundingMode.HALF_UP);
                 cogsTotal = cogsTotal.add(lineCost);
-                db.update("INSERT INTO trade_stock_out_detail(out_no,product_code,product_name,spec_model,qty,unit_cost,total_amount) VALUES(?,?,?,?,?,?,?)",
-                    outNo, pCode, pName, spec, qty, unitCost, lineCost);
+                db.update("INSERT INTO trade_stock_out_detail(out_no,line_no,product_code,product_name,spec_model,qty,unit_cost,amount) VALUES(?,?,?,?,?,?,?,?)",
+                    outNo, ++lineNo, pCode, pName, spec, qty, unitCost, lineCost);
             }
         }
 

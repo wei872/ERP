@@ -33,6 +33,8 @@ app:
   env: ${APP_ENV:dev}
   # 是否在后端启动时自动播种演示账号（生产环境请设为 false）
   seed-demo-users: ${SEED_DEMO_USERS:true}
+  # 是否在业务表为空时装载演示业务数据（生产环境请设为 false）
+  seed-demo-data: ${SEED_DEMO_DATA:true}
   # 生产环境首次部署可用此变量指定管理员初始密码（仅创建时生效，不会覆盖已有密码）
   seed-admin-password: ${SEED_ADMIN_PASSWORD:}
 

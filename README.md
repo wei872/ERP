@@ -112,13 +112,17 @@ erp/
 ### 第 1 步：数据库
 
 ```bash
-# 创建库 + 加载基础表
-mysql -u root -p --default-character-set=utf8mb4 < database/init.sql
-# 加载扩展表（幂等，可重复运行）
-mysql -u root -p --default-character-set=utf8mb4 < database/upgrade.sql
+# 按顺序执行 5 个脚本（顺序敏感，均可重复执行）
+mysql -u root -p --default-character-set=utf8mb4 < database/init.sql          # 78 张基础表
+mysql -u root -p --default-character-set=utf8mb4 < database/upgrade.sql       # 268 张扩展表 + 工作流表
+mysql -u root -p --default-character-set=utf8mb4 < database/upgrade2.sql      # 字典/唯一键/外键/索引
+mysql -u root -p --default-character-set=utf8mb4 < database/registry_seed.sql # 表注册种子
+mysql -u root -p --default-character-set=utf8mb4 < database/upgrade3.sql      # v5.2 列补丁（BOM父子件等）
 ```
 
-> ⚠️ 顺序敏感：必须先 `init.sql` 后 `upgrade.sql`。`upgrade.sql` 已补齐 162 张业务表，与前端 `mockData.ts` 完全对齐。
+> 启动后端后若业务表为空，会自动装载一套 9 个月跨度的**自洽演示数据**
+>（销售/采购/库存/生产/凭证/应收应付/审批/工资），仪表盘与报表开箱即有数据。
+> 生产环境设置 `SEED_DEMO_DATA=false` 关闭。
 
 ### 第 2 步：后端
 
@@ -177,7 +181,8 @@ docker compose up -d --build
 
 - 三容器（MySQL 8 / 后端 / 前端 nginx）带健康检查与数据卷持久化，首次自动初始化全部 4 个 SQL 脚本；
 - 后端镜像为多阶段构建（无需先在宿主机 `mvn package`），运行镜像 JRE + 非 root 用户；
-- 生产环境默认 `SEED_DEMO_USERS=false`，不创建演示账号。
+- 默认装载演示账号与 9 个月自洽演示业务数据（`SEED_DEMO_USERS` / `SEED_DEMO_DATA`），
+  开箱即可看到完整直观的业务数据；正式生产前在 `.env` 中关闭。
 
 完整部署 / 升级 / 备份 / 安全检查清单见 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)。
 

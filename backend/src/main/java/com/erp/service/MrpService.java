@@ -14,13 +14,32 @@ public class MrpService {
     @Autowired private JdbcTemplate db;
     @Autowired private ProductionService production;
 
+    /** BOM 展开：优先按 parent_code 匹配（v3 模型），兼容旧数据按 product_code 匹配 */
+    private List<Map<String,Object>> bomOf(String productCode) {
+        try {
+            return db.queryForList(
+                "SELECT * FROM prod_bom_structure WHERE parent_code=? OR (parent_code IS NULL AND product_code=?)",
+                productCode, productCode);
+        } catch (Exception e) {
+            // 尚未执行 upgrade3.sql 时无 parent_code 列，退回旧查询
+            return db.queryForList("SELECT * FROM prod_bom_structure WHERE product_code=?", productCode);
+        }
+    }
+
+    /** 取 BOM 行的子件编码：优先 component_code，兼容旧行退回 product_code */
+    private String componentCodeOf(Map<String,Object> item, String fallback) {
+        Object cc = item.get("component_code");
+        if (cc != null && !String.valueOf(cc).isEmpty()) return String.valueOf(cc);
+        Object pc = item.get("product_code");
+        return pc == null ? fallback : String.valueOf(pc);
+    }
+
     /** MRP净需求计算：净需求 = 总需求 - 现有库存 - 在途 + 安全库存(min_stock)。
      *  在途 = 已下单未入库的采购在单数量 */
     @Transactional
     public void calculateNetDemand(String productCode, BigDecimal demandQty) {
         // 1. BOM 展开物料清单
-        List<Map<String,Object>> bom = db.queryForList(
-            "SELECT * FROM prod_bom_structure WHERE product_code=?", productCode);
+        List<Map<String,Object>> bom = bomOf(productCode);
 
         // 2. 现有库存 + 安全库存(min_stock)：按 product_code 聚合 max(min_stock) 作为安全库存来源
         Map<String,BigDecimal> stockMap = new HashMap<>();
@@ -56,7 +75,7 @@ public class MrpService {
         }
 
         for (Map<String,Object> item : bom) {
-            String matCode = String.valueOf(item.get("product_code"));
+            String matCode = componentCodeOf(item, productCode);
             BigDecimal qtyPer = toBD(item.getOrDefault("qty","1"));
             BigDecimal totalDemand = demandQty.multiply(qtyPer);
             BigDecimal currentStock = stockMap.getOrDefault(matCode, BigDecimal.ZERO);
@@ -65,9 +84,15 @@ public class MrpService {
             BigDecimal netDemand = totalDemand.subtract(currentStock).subtract(inTransit).add(safetyStock).max(BigDecimal.ZERO);
 
             String calcCode = "MRP-" + System.currentTimeMillis() + "-" + matCode;
+            // 物料名称取商品主数据，兜底用编码
+            String matName = matCode;
+            try {
+                List<Map<String,Object>> g = db.queryForList("SELECT product_name FROM trade_goods_main WHERE product_code=?", matCode);
+                if (!g.isEmpty() && g.get(0).get("product_name") != null && !String.valueOf(g.get(0).get("product_name")).isEmpty()) matName = String.valueOf(g.get(0).get("product_name"));
+            } catch (Exception ignored) {}
             try {
                 db.update("INSERT INTO prod_mrp_calc(calc_code,calc_date,plan_start_date,plan_end_date,calc_type,product_code,product_name,spec_model,demand_qty,current_stock,in_transit_qty,allocated_qty,net_demand,suggest_purchase,suggest_produce,planner,calc_status) VALUES(?,CURDATE(),CURDATE(),DATE_ADD(CURDATE(),INTERVAL 30 DAY),'MRP',?,?,?,?,?,?,0,?,?,0,'系统','已运算')",
-                    calcCode, matCode, matCode, item.getOrDefault("spec_model", item.getOrDefault("spec","")),
+                    calcCode, matCode, matName, item.getOrDefault("spec_model", item.getOrDefault("spec","")),
                     totalDemand, currentStock, inTransit, netDemand, netDemand);
             } catch (Exception e) {
                 System.err.println("MRP insert failed for " + matCode + ": " + e.getMessage());
@@ -90,16 +115,26 @@ public class MrpService {
         BigDecimal price = BigDecimal.ZERO;
         String supplierCode = "SUPP-001", supplierName = "默认供应商";
         try {
-            Map<String,Object> g = db.queryForMap("SELECT unit_cost, purchase_price, supplier_code, supplier_name FROM trade_goods_main WHERE product_code=?", pCode);
-            price = toBD(g.getOrDefault("purchase_price", g.getOrDefault("unit_cost", 0)));
-            if (g.get("supplier_name") != null) supplierName = String.valueOf(g.get("supplier_name"));
+            Map<String,Object> g = db.queryForMap("SELECT unit_cost, purchase_price FROM trade_goods_main WHERE product_code=?", pCode);
+            price = toBD(g.get("purchase_price") != null ? g.get("purchase_price") : g.get("unit_cost"));
+        } catch (Exception ignored) {}
+        // 优先复用该物料最近一次采购的供应商
+        try {
+            Map<String,Object> sup = db.queryForMap(
+                "SELECT m.supplier_code, m.supplier_name FROM trade_purchase_detail d " +
+                "JOIN trade_purchase_main m ON m.purchase_no=d.purchase_no " +
+                "WHERE d.product_code=? ORDER BY d.id DESC LIMIT 1", pCode);
+            if (sup.get("supplier_code") != null && !String.valueOf(sup.get("supplier_code")).isEmpty()) {
+                supplierCode = String.valueOf(sup.get("supplier_code"));
+                supplierName = String.valueOf(sup.getOrDefault("supplier_name", supplierName));
+            }
         } catch (Exception ignored) {}
 
         String poNo = "PO-MRP-" + System.currentTimeMillis();
         BigDecimal totalAmt = suggestPur.multiply(price).setScale(2, RoundingMode.HALF_UP);
-        db.update("INSERT INTO trade_purchase_main(purchase_no,supplier_code,supplier_name,purchase_date,delivery_date,total_amount,purchase_status,arrival_status,buyer) VALUES(?,?,?,CURDATE(),DATE_ADD(CURDATE(),INTERVAL 7 DAY),?,'已下单','待到货',?)",
+        db.update("INSERT INTO trade_purchase_main(purchase_no,supplier_code,supplier_name,purchase_date,total_amount,buyer,purchase_status,warehouse) VALUES(?,?,?,CURDATE(),?,?,'已审核','默认仓')",
             poNo, supplierCode, supplierName, totalAmt, operator == null ? "系统" : operator);
-        db.update("INSERT INTO trade_purchase_detail(purchase_no,product_code,product_name,spec_model,qty,unit_price,total_amount) VALUES(?,?,?,?,?,?,?)",
+        db.update("INSERT INTO trade_purchase_detail(purchase_no,line_no,product_code,product_name,spec_model,qty,unit_price,amount) VALUES(?,1,?,?,?,?,?,?)",
             poNo, pCode, pName, spec, suggestPur, price, totalAmt);
 
         db.update("UPDATE prod_mrp_calc SET calc_status='已转采购' WHERE calc_code=?", calcCode);
@@ -141,8 +176,7 @@ public class MrpService {
 
     private BigDecimal rollUpCost(String productCode, Set<String> visited) {
         if (!visited.add(productCode)) return BigDecimal.ZERO; // 防循环
-        List<Map<String,Object>> bom = db.queryForList(
-            "SELECT product_code, qty, unit_price FROM prod_bom_structure WHERE product_code=?", productCode);
+        List<Map<String,Object>> bom = bomOf(productCode);
         if (bom.isEmpty()) {
             // 自身无 BOM：尝试从 trade_goods_main 取成本
             try {
@@ -154,7 +188,7 @@ public class MrpService {
         }
         BigDecimal total = BigDecimal.ZERO;
         for (Map<String,Object> item : bom) {
-            String matCode = String.valueOf(item.get("product_code"));
+            String matCode = componentCodeOf(item, productCode);
             BigDecimal qty = toBD(item.get("qty"));
             BigDecimal unitPrice = toBD(item.get("unit_price"));
             // 子件成本优先用其自身 rollUp；若是叶件用 unit_price

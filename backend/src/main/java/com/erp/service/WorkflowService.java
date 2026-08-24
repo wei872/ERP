@@ -148,7 +148,7 @@ public class WorkflowService {
                 db.update("INSERT INTO oa_purchase_approval(approval_no,purchase_no,supplier_name,total_amount,applicant,approval_status) VALUES(?,?,?,?,?,'待审批')",
                     no, refNo, supplierName, total, applicant);
             } else if ("费用审批".equals(type)) {
-                db.update("INSERT INTO oa_expense_approval(approval_no,expense_type,amount,applicant,approval_status) VALUES(?,?,?,?,?,'待审批')",
+                db.update("INSERT INTO oa_expense_approval(approval_no,expense_type,amount,applicant,approval_status) VALUES(?,?,?,?,'待审批')",
                     no, remark == null ? "其他" : remark.length() > 30 ? remark.substring(0, 30) : remark,
                     amount == null ? BigDecimal.ZERO : amount, applicant);
             }

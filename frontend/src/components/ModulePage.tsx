@@ -4,6 +4,21 @@ import { dataApi } from '../api';
 import { bizApi } from '../api';
 import { useTableMeta, statusBadgeClass } from '../meta/store';
 
+/** 数字列：千分位 + 最多2位小数；空值显示占位符 */
+function formatCellNum(v: unknown): string {
+  if (v === null || v === undefined || String(v).trim() === '') return '—';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v);
+  const rounded = Math.round(n * 100) / 100;
+  return Math.abs(rounded) >= 1000 ? rounded.toLocaleString(undefined, { maximumFractionDigits: 2 }) : String(rounded);
+}
+/** 日期列：只显示 YYYY-MM-DD（兼容 ISO/空格分隔格式） */
+function formatCellDate(v: unknown): string {
+  if (!v) return '—';
+  const s = String(v);
+  return s.length >= 10 ? s.slice(0, 10) : s;
+}
+
 export default function ModulePage({ tableKey }: { tableKey: string }) {
   const { currentUser } = useAuth();
   const [search, setSearch] = useState('');
@@ -231,7 +246,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
         <table className="erp-table">
           <thead><tr>
             <th className="w-12">#</th>
-            {table.cols.map(col => <th key={col.name} className="whitespace-nowrap">{col.cnName}</th>)}
+            {table.cols.map(col => <th key={col.name} className={`whitespace-nowrap ${col.type === 'number' ? 'text-right' : ''}`}>{col.cnName}</th>)}
             <th className="text-center w-40 sticky right-0 bg-slate-50">操作</th>
           </tr></thead>
           <tbody>
@@ -240,9 +255,10 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
               {table.cols.map(col => { const k = col.name, t = col.type; const v = row[k]; return <td key={k} className="whitespace-nowrap" >
                 {String(v ?? '').startsWith('data:image/') || (t === 'image' && false) ? (
                   v ? <img src={String(v)} alt="发票图片" onClick={() => setPreviewImg(String(v))} className="h-9 w-14 object-cover rounded border border-slate-200 cursor-pointer shadow-sm hover:scale-105 transition-transform" title="点击放大查看图片" /> : <span className="text-slate-300 text-xs italic">无图片</span>
-                ) : t === 'number' ? <span className="font-mono tabular-nums text-slate-700">{typeof v === 'number' ? (v as number).toLocaleString() : String(v ?? '')}</span>
+                ) : t === 'number' ? <span className="font-mono tabular-nums text-slate-700 block text-right">{formatCellNum(v)}</span>
+                : t === 'date' ? <span className="text-slate-500 tabular-nums">{formatCellDate(v)}</span>
                 : (k.includes('status') || k.includes('_status') || dicts[k]) ? <span className={`erp-badge ${statusBadgeClass(k, v, dicts)}`}>{String(v ?? '')}</span>
-                : <span className="text-slate-600">{String(v ?? '')}</span>}
+                : <span className="text-slate-600">{String(v ?? '') || '—'}</span>}
               </td>; })}
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
                 <div className="flex items-center justify-center gap-1.5">

@@ -20,18 +20,34 @@ public class ProductionService {
     @Transactional
     public Map<String,Object> createWorkOrder(String planNo, String productCode, String specModel, BigDecimal planQty, String workshop, String operator) {
         String woNo = "WO-" + System.currentTimeMillis();
-        db.update("INSERT INTO prod_work_order(work_order_no,ref_plan_no,product_code,product_name,spec_model,plan_qty,actual_qty,complete_qty,scrap_qty,unit,workshop,leader,start_date,plan_end_date,order_status,priority) VALUES(?,?,?,?,?,?,0,0,0,'件',?,?,CURDATE(),DATE_ADD(CURDATE(),INTERVAL 7 DAY),'生产中','中')",
-            woNo, planNo == null ? "" : planNo, productCode, productCode, specModel == null ? "" : specModel, planQty, workshop == null ? "默认车间" : workshop, operator == null ? "系统" : operator);
+        // 商品名称优先取商品主数据，避免把编码当名称展示
+        String productName = productCode;
+        String goodsSpec = specModel == null ? "" : specModel;
+        try {
+            List<Map<String,Object>> goods = db.queryForList("SELECT product_name, spec_model FROM trade_goods_main WHERE product_code=?", productCode);
+            if (!goods.isEmpty()) {
+                if (goods.get(0).get("product_name") != null && !String.valueOf(goods.get(0).get("product_name")).isEmpty()) productName = String.valueOf(goods.get(0).get("product_name"));
+                if (goodsSpec.isEmpty() && goods.get(0).get("spec_model") != null) goodsSpec = String.valueOf(goods.get(0).get("spec_model"));
+            }
+        } catch (Exception ignored) {}
+        db.update("INSERT INTO prod_work_order(work_order_no,ref_plan_no,product_code,product_name,spec_model,plan_qty,actual_qty,complete_qty,scrap_qty,unit,workshop,leader,start_date,plan_end_date,order_status,priority) VALUES(?,?,?,?,?,?,0,0,0,'件',?,?,CURDATE(),DATE_ADD(CURDATE(),INTERVAL 7 DAY),'进行中','中')",
+            woNo, planNo == null ? "" : planNo, productCode, productName, goodsSpec, planQty, workshop == null ? "默认车间" : workshop, operator == null ? "系统" : operator);
 
         // BOM 展算 → 自动创建领料单（每个 BOM 组件生成一条领料记录）
         try {
-            List<Map<String,Object>> bom = db.queryForList("SELECT * FROM prod_bom_structure WHERE product_code=?", productCode);
+            List<Map<String,Object>> bom;
+            try {
+                bom = db.queryForList("SELECT * FROM prod_bom_structure WHERE parent_code=? OR (parent_code IS NULL AND product_code=?)", productCode, productCode);
+            } catch (Exception legacy) {
+                bom = db.queryForList("SELECT * FROM prod_bom_structure WHERE product_code=?", productCode);
+            }
             if (!bom.isEmpty()) {
                 String reqNo = "REQ-" + System.currentTimeMillis();
                 for (Map<String,Object> item : bom) {
-                    String matCode = String.valueOf(item.getOrDefault("product_code", productCode));
-                    String matName = String.valueOf(item.getOrDefault("product_name", productCode));
-                    String matSpec = String.valueOf(item.getOrDefault("spec",""));
+                    Object cc = item.get("component_code");
+                    String matCode = (cc != null && !String.valueOf(cc).isEmpty()) ? String.valueOf(cc) : String.valueOf(item.getOrDefault("product_code", productCode));
+                    String matName = String.valueOf(item.getOrDefault("product_name", matCode));
+                    String matSpec = String.valueOf(item.getOrDefault("spec_model", item.getOrDefault("spec","")));
                     BigDecimal qtyPer = new BigDecimal(item.getOrDefault("qty","1").toString());
                     BigDecimal reqQty = qtyPer.multiply(planQty).setScale(4, RoundingMode.HALF_UP);
                     db.update("INSERT INTO prod_material_requisition(req_no,ref_work_order,product_code,product_name,spec_model,plan_req_qty,actual_req_qty,unit,warehouse,req_date,req_person,reviewer,review_date) VALUES(?,?,?,?,?,?,0,'件','默认仓',CURDATE(),?,NULL,NULL)",
@@ -75,8 +91,8 @@ public class ProductionService {
             new BigDecimal(wo.get("plan_qty").toString()), actualInQty,
             warehouse == null ? "默认仓" : warehouse, operator == null ? "系统" : operator);
 
-        // 库存入库（按产品成本加权平均）
-        inventory.stockIn(productCode, productName, specModel, warehouse == null ? "默认仓" : warehouse, "", actualInQty, unitCost);
+        // 库存入库（按产品成本加权平均），流水关联生产入库单号
+        inventory.stockIn(productCode, productName, specModel, warehouse == null ? "默认仓" : warehouse, "", actualInQty, unitCost, inNo);
 
         // 更新工单完成量
         db.update("UPDATE prod_work_order SET actual_qty=actual_qty+?, complete_qty=complete_qty+? WHERE work_order_no=?",
@@ -104,11 +120,21 @@ public class ProductionService {
             "SELECT COALESCE(SUM(d.plan_req_qty * COALESCE(g.unit_cost,0)),0) FROM prod_material_requisition d LEFT JOIN trade_goods_main g ON g.product_code=d.product_code WHERE d.ref_work_order=?",
             BigDecimal.class, workOrderNo);
         if (materialCost == null) materialCost = BigDecimal.ZERO;
-        // 工序成本（来自 prod_process_mgmt 的 unit_price * 标准工时）
-        BigDecimal laborCost = db.queryForObject(
-            "SELECT COALESCE(SUM(p.unit_price * p.standard_hours),0) FROM prod_process_mgmt p WHERE p.process_code IN (SELECT DISTINCT b.product_code FROM prod_bom_structure b WHERE b.product_code=?)",
-            BigDecimal.class, productCode);
+        // 工序成本（来自 prod_process_mgmt 的 unit_price * 标准工时，按 BOM 子件匹配工序）
+        BigDecimal laborCost;
+        try {
+            laborCost = db.queryForObject(
+                "SELECT COALESCE(SUM(p.unit_price * p.standard_hours),0) FROM prod_process_mgmt p WHERE p.process_code IN " +
+                "(SELECT DISTINCT COALESCE(b.component_code, b.product_code) FROM prod_bom_structure b WHERE b.parent_code=? OR (b.parent_code IS NULL AND b.product_code=?))",
+                BigDecimal.class, productCode, productCode);
+        } catch (Exception legacy) {
+            laborCost = db.queryForObject(
+                "SELECT COALESCE(SUM(p.unit_price * p.standard_hours),0) FROM prod_process_mgmt p WHERE p.process_code IN (SELECT DISTINCT b.product_code FROM prod_bom_structure b WHERE b.product_code=?)",
+                BigDecimal.class, productCode);
+        }
         if (laborCost == null) laborCost = BigDecimal.ZERO;
+        // 人工 + 制造费用按产量分摊的简化补充：每工时 25 元 × 标准 1 工时/件
+        laborCost = laborCost.add(produceQty.multiply(new BigDecimal("25"))).setScale(2, RoundingMode.HALF_UP);
         BigDecimal totalCost = materialCost.add(laborCost).setScale(2, RoundingMode.HALF_UP);
         BigDecimal unitCost = produceQty.signum() > 0 ? totalCost.divide(produceQty, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
