@@ -41,7 +41,8 @@ const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[]
 export default function Layout() {
   const { currentUser, users, logout } = useAuth();
   const [page, setPage] = useState<Page>({ type: 'dashboard' });
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window !== 'undefined' && window.innerWidth >= 768);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const [expandedMods, setExpandedMods] = useState<Set<string>>(new Set());
   const [expandedSubs, setExpandedSubs] = useState<Set<string>>(new Set());
   const pendingCount = users.filter(u => u.status === 'pending').length;
@@ -123,7 +124,15 @@ export default function Layout() {
           <span className={`erp-badge ${ROLE_COLORS[currentUser.role]}`}>{ROLE_LABELS[currentUser.role]}</span>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' }}>{currentUser.realName[0]}</div>
           <span className="text-sm text-slate-600 hidden md:block font-medium">{currentUser.realName}</span>
-          <button onClick={logout} className="p-2 text-slate-400 hover:text-red-500 rounded-lg transition-all hover:bg-red-50"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg></button>
+          {confirmLogout ? (
+            <div className="flex items-center gap-1.5 text-xs erp-fade-in">
+              <span className="text-slate-500">确认退出登录？</span>
+              <button onClick={() => { setConfirmLogout(false); logout(); }} className="px-2.5 py-1 rounded-md bg-red-500 text-white font-medium hover:bg-red-600 transition-colors">退出</button>
+              <button onClick={() => setConfirmLogout(false)} className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">取消</button>
+            </div>
+          ) : (
+            <button onClick={() => { setConfirmLogout(true); setTimeout(() => setConfirmLogout(false), 4000); }} title="退出登录" className="p-2 text-slate-400 hover:text-red-500 rounded-lg transition-all hover:bg-red-50"><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg></button>
+          )}
         </div>
       </header>
       <main className="flex-1 overflow-auto bg-slate-50 erp-fade-in">

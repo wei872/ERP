@@ -8,7 +8,11 @@ async function request<T = any>(url: string, options: RequestInit = {}): Promise
   const res = await fetch(`${BASE}${url}`, { ...options, headers });
   const json = await res.json();
   if (!json.success) {
-    if (res.status === 401) { localStorage.removeItem('erp_token'); localStorage.removeItem('erp_current_user'); }
+    if (res.status === 401) {
+      localStorage.removeItem('erp_token'); localStorage.removeItem('erp_current_user');
+      // 广播会话失效：AuthContext 监听后退出登录并提示，避免用户停留在假登录态
+      window.dispatchEvent(new CustomEvent('erp:unauthorized', { detail: json.message || '未登录或Token已过期' }));
+    }
     throw new Error(json.message || '请求失败');
   }
   return json;
@@ -25,7 +29,7 @@ export const authApi = {
   getMe: () => request('/auth/me'),
 };
 export const dataApi = {
-  list: (t: string, page = 1, size = 100, s = '') => request<{ total: number; rows: any[] }>(`/data/${t}?page=${page}&size=${size}&search=${encodeURIComponent(s)}`),
+  list: (t: string, page = 1, size = 100, s = '', sort = '', dir = '') => request<{ total: number; rows: any[] }>(`/data/${t}?page=${page}&size=${size}&search=${encodeURIComponent(s)}&sort=${encodeURIComponent(sort)}&dir=${dir}`),
   create: (t: string, d: Record<string, unknown>) => request(`/data/${t}`, { method: 'POST', body: JSON.stringify(d) }),
   update: (t: string, id: number, d: Record<string, unknown>) => request(`/data/${t}/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   delete: (t: string, id: number) => request(`/data/${t}/${id}`, { method: 'DELETE' }),

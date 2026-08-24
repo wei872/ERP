@@ -3,8 +3,9 @@ import { useAuth } from '../context/AuthContext';
 import { type UserRole, ROLE_LABELS, ROLE_COLORS } from '../types';
 
 export default function Login() {
-  const { login, register } = useAuth();
+  const { login, register, sessionNotice, clearSessionNotice } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
+  const [showPw, setShowPw] = useState(false);
   const [username, setUsername] = useState(''); const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState(''); const [realName, setRealName] = useState('');
   const [phone, setPhone] = useState(''); const [email, setEmail] = useState('');
@@ -39,13 +40,27 @@ export default function Login() {
             <button onClick={() => { setIsLogin(true); setError(''); setSuccess(''); }} className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${isLogin ? 'text-white shadow-lg' : 'text-white/50 hover:text-white/80'}`} style={isLogin ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : {}}>登录</button>
             <button onClick={() => { setIsLogin(false); setError(''); setSuccess(''); }} className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${!isLogin ? 'text-white shadow-lg' : 'text-white/50 hover:text-white/80'}`} style={!isLogin ? { background: 'linear-gradient(135deg, #6366f1, #8b5cf6)' } : {}}>注册</button>
           </div>
+          {sessionNotice && <div className="bg-amber-500/15 border border-amber-500/25 rounded-xl p-3 mb-4 text-amber-200 text-sm flex items-center gap-2"><span className="shrink-0">⏱️</span>{sessionNotice}<button type="button" onClick={clearSessionNotice} className="ml-auto text-amber-300/70 hover:text-amber-100">✕</button></div>}
           {error && <div className="bg-red-500/15 border border-red-500/25 rounded-xl p-3 mb-4 text-red-200 text-sm flex items-center gap-2"><svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd"/></svg>{error}</div>}
           {success && <div className="bg-emerald-500/15 border border-emerald-500/25 rounded-xl p-3 mb-4 text-emerald-200 text-sm flex items-center gap-2"><svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg>{success}</div>}
           {isLogin ? (
             <form onSubmit={handleLogin} className="space-y-4">
-              <div><label className={labelCls}>用户名</label><input type="text" value={username} onChange={e => setUsername(e.target.value)} className={inputCls} placeholder="请输入用户名"/></div>
-              <div><label className={labelCls}>密码</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} placeholder="请输入密码"/></div>
+              <div><label className={labelCls}>用户名</label><input type="text" value={username} onChange={e => setUsername(e.target.value)} className={inputCls} placeholder="请输入用户名" autoComplete="username"/></div>
+              <div><label className={labelCls}>密码</label>
+                <div className="relative">
+                  <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} className={inputCls + ' pr-12'} placeholder="请输入密码" autoComplete="current-password"/>
+                  <button type="button" onClick={() => setShowPw(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition-colors text-sm" title={showPw ? '隐藏密码' : '显示密码'}>{showPw ? '🙈' : '👁️'}</button>
+                </div>
+              </div>
               <button type="submit" disabled={loading} className="w-full py-3 text-white rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-50" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 8px 25px rgba(99,102,241,0.4)' }}>{loading ? '登录中...' : '登 录'}</button>
+              <div className="pt-1">
+                <p className="text-white/30 text-[11px] mb-2 text-center">演示账号一键填充（生产环境请关闭 SEED_DEMO_USERS）</p>
+                <div className="flex flex-wrap gap-1.5 justify-center">
+                  {[['admin','admin123','管理员'],['zhangsan','123456','销售'],['wangwu','123456','会计'],['lisi','123456','仓管'],['zhaoliu','123456','生产']].map(([u,p,lab]) => (
+                    <button key={u} type="button" onClick={() => { setUsername(u); setPassword(p); setError(''); }} className="px-2.5 py-1 rounded-full text-[11px] bg-white/5 border border-white/10 text-white/60 hover:bg-indigo-500/20 hover:text-indigo-200 hover:border-indigo-400/40 transition-all">{lab} {u}</button>
+                  ))}
+                </div>
+              </div>
             </form>
           ) : (
             <form onSubmit={handleRegister} className="space-y-4">
@@ -53,12 +68,12 @@ export default function Login() {
               <div><label className={labelCls}>真实姓名 *</label><input type="text" value={realName} onChange={e => setRealName(e.target.value)} className={inputCls} placeholder="请输入真实姓名"/></div>
               <div><label className={labelCls}>选择身份 *</label><div className="grid grid-cols-3 gap-2">{(['sales','aftersale','warehouse','accounting','production','hr','procurement'] as UserRole[]).map(r => (<button key={r} type="button" onClick={() => setRole(r)} className={`px-2.5 py-2.5 rounded-lg text-xs font-medium transition-all border ${role === r ? `${ROLE_COLORS[r]} border-indigo-400 ring-2 ring-indigo-400/30` : 'bg-white/5 border-white/10 text-white/55 hover:bg-white/10 hover:text-white'}`}>{ROLE_LABELS[r]}</button>))}</div></div>
               <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>手机号 *</label><input type="tel" value={phone} onChange={e => setPhone(e.target.value)} className={inputCls} placeholder="手机号"/></div><div><label className={labelCls}>邮箱</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="邮箱(选填)"/></div></div>
-              <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>密码 *</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} placeholder="至少6位"/></div><div><label className={labelCls}>确认密码 *</label><input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className={inputCls} placeholder="再次输入"/></div></div>
+              <div className="grid grid-cols-2 gap-3"><div><label className={labelCls}>密码 *</label><input type="password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} placeholder="至少8位，含字母和数字"/></div><div><label className={labelCls}>确认密码 *</label><input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className={inputCls} placeholder="再次输入"/></div></div>
               <button type="submit" className="w-full py-3 text-white rounded-xl font-medium transition-all active:scale-[0.98]" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 8px 25px rgba(99,102,241,0.4)' }}>提交注册</button>
             </form>
           )}
         </div>
-        <div className="text-center mt-6 text-white/20 text-xs">© 2025 ERP 企业管理系统</div>
+        <div className="text-center mt-6 text-white/20 text-xs">© 2026 ERP 企业管理系统</div>
       </div>
     </div>
   );

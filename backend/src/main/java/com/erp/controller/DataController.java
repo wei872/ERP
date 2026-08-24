@@ -135,6 +135,7 @@ public class DataController {
     @GetMapping("/{table}")
     public Result query(@PathVariable String table, @RequestParam(defaultValue="1") int page,
                         @RequestParam(defaultValue="15") int size, @RequestParam(defaultValue="") String search,
+                        @RequestParam(defaultValue="") String sort, @RequestParam(defaultValue="") String dir,
                         HttpServletRequest req) {
         try {
             String t = safe(table);
@@ -156,8 +157,17 @@ public class DataController {
                 }
             }
             Long total=db.queryForObject("SELECT COUNT(*) FROM "+t+where,Long.class,params.toArray());
+            // 排序列白名单校验（仅允许真实列，方向仅 asc/desc），防止注入
+            String orderBy = "";
+            if (!sort.isEmpty()) {
+                boolean valid = false;
+                for (Map<String,Object> c : meta.columns(t)) {
+                    if (sort.equals(String.valueOf(c.get("name")))) { valid = true; break; }
+                }
+                if (valid) orderBy = " ORDER BY `" + sort + "` " + ("asc".equalsIgnoreCase(dir) ? "ASC" : "DESC");
+            }
             params.add(size);params.add((page-1)*size);
-            List<Map<String,Object>> rows=db.queryForList("SELECT * FROM "+t+where+" LIMIT ? OFFSET ?",params.toArray());
+            List<Map<String,Object>> rows=db.queryForList("SELECT * FROM "+t+where+orderBy+" LIMIT ? OFFSET ?",params.toArray());
             return Result.ok(map("total",total,"page",page,"rows",rows));
         } catch (IllegalArgumentException e) {
             return Result.error(e.getMessage());

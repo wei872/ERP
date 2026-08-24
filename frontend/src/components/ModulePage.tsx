@@ -42,6 +42,11 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   // 业财一体化联动面板
   const [linkData, setLinkData] = useState<any | null>(null);
   const [linkNo, setLinkNo] = useState('');
+  // 列排序（服务端排序，白名单校验）
+  const [sortCol, setSortCol] = useState('');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  // 操作指南默认收起，降低视觉噪音
+  const [showGuide, setShowGuide] = useState(false);
   const pageSize = 15;
 
 
@@ -54,12 +59,12 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   const canEdit = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canEdit === true);
   const canDelete = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canDelete === true);
 
-  // 🔧 把 search 参数传给后端，触发后端 LIKE 搜索
-  const fetchData = useCallback(async (pg: number, kw: string) => {
+  // 🔧 把 search / sort 参数传给后端，触发后端 LIKE 搜索与列排序
+  const fetchData = useCallback(async (pg: number, kw: string, sc: string = '', sd: string = '') => {
     if (!table) return;
     setLoading(true); setError('');
     try {
-      const r = await dataApi.list(tableKey, pg, pageSize, kw);
+      const r = await dataApi.list(tableKey, pg, pageSize, kw, sc, sd);
       if (r.data && Array.isArray(r.data.rows)) {
         setData(r.data.rows);
         setTotalRows(r.data.total || 0);
@@ -72,7 +77,14 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   }, [table, tableKey, pageSize]);
 
   // 首次加载 + tableKey 变化（列元数据就绪后才拉数据）
-  useEffect(() => { setLoaded(false); setSearch(''); setCurrentPage(1); if (table) fetchData(1, ''); }, [tableKey, table]);
+  useEffect(() => { setLoaded(false); setSearch(''); setCurrentPage(1); setSortCol(''); setSortDir('desc'); if (table) fetchData(1, ''); }, [tableKey, table]);
+
+  // 点击表头排序：同列切换方向，新列默认降序
+  const toggleSort = useCallback((colName: string) => {
+    const nextDir = sortCol === colName ? (sortDir === 'desc' ? 'asc' : 'desc') : 'desc';
+    setSortCol(colName); setSortDir(nextDir); setCurrentPage(1);
+    fetchData(1, search, colName, nextDir);
+  }, [sortCol, sortDir, search, fetchData]);
 
   // 翻页触发
   useEffect(() => { if (loaded) fetchData(currentPage, search); }, [currentPage]);
@@ -216,15 +228,18 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
   return (<div className="p-6 space-y-5 erp-fade-in">
     {toast && <div className="erp-toast">{toast}</div>}
 
-    {/* UI 引导与数据联动说明 */}
-    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+    {/* UI 引导与数据联动说明（默认收起，点击展开） */}
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
+      <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
+        <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-300">
           <span>💡</span> 【{table.cnName} ({tableKey})】数据表说明与智能操作
         </h3>
-        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">ERP 底层实体基座</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <span className="flex items-center gap-2">
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">ERP 底层实体基座</span>
+          <span className="text-indigo-300/70 text-xs">{showGuide ? '▲ 收起' : '▼ 展开'}</span>
+        </span>
+      </button>
+      {showGuide && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed mt-3">
         <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
           <div className="font-semibold text-amber-300 flex items-center gap-1.5">
             <span>📝</span> 界面使用指南：
@@ -245,7 +260,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
             {tableKey !== 'trade_purchase_main' && tableKey !== 'trade_sales_main' && <li>上层业务面板（生产管理/出入库/核销/审批）操作时，会自动驱动本表落库与事务更新。</li>}
           </ul>
         </div>
-      </div>
+      </div>}
     </div>
 
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -280,7 +295,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
         <table className="erp-table">
           <thead><tr>
             <th className="w-12">#</th>
-            {table.cols.map(col => <th key={col.name} className={`whitespace-nowrap ${col.type === 'number' ? 'text-right' : ''}`}>{col.cnName}</th>)}
+            {table.cols.map(col => <th key={col.name} onClick={() => toggleSort(col.name)} title="点击排序" className={`whitespace-nowrap cursor-pointer select-none hover:text-indigo-600 transition-colors ${col.type === 'number' ? 'text-right' : ''}`}>{col.cnName}{sortCol === col.name && <span className="text-indigo-500 ml-0.5">{sortDir === 'asc' ? '↑' : '↓'}</span>}</th>)}
             <th className="text-center w-40 sticky right-0 bg-slate-50">操作</th>
           </tr></thead>
           <tbody>
@@ -292,7 +307,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
                 ) : t === 'number' ? <span className="font-mono tabular-nums text-slate-700 block text-right">{formatCellNum(v)}</span>
                 : t === 'date' ? <span className="text-slate-500 tabular-nums">{formatCellDate(v)}</span>
                 : (k.includes('status') || k.includes('_status') || dicts[k]) ? <span className={`erp-badge ${statusBadgeClass(k, v, dicts)}`}>{String(v ?? '')}</span>
-                : <span className="text-slate-600">{String(v ?? '') || '—'}</span>}
+                : <span className="text-slate-600 block max-w-[280px] truncate" title={String(v ?? '')}>{String(v ?? '') || '—'}</span>}
               </td>; })}
               <td className="text-center sticky right-0 bg-white" style={{ boxShadow: '-4px 0 8px -4px rgba(0,0,0,0.06)' }}>
                 <div className="flex items-center justify-center gap-1.5">

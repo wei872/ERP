@@ -35,15 +35,19 @@ function n2v(n: any): number { const v = Number(n); return Number.isFinite(v) ? 
 function fmt(v: number): string { return v >= 10000 ? `${(v/10000).toFixed(1)}万` : v.toLocaleString(); }
 
 function GuidanceCard({ steps, linkages }: { steps: string[]; linkages: string[] }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center justify-between text-left">
+        <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-300">
           <span>💡</span> 业务操作指南与后台数据联动说明
         </h3>
-        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">全自动实时同步</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <span className="flex items-center gap-2">
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">全自动实时同步</span>
+          <span className="text-indigo-300/70 text-xs">{open ? '▲ 收起' : '▼ 展开'}</span>
+        </span>
+      </button>
+      {open && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed mt-3">
         <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
           <div className="font-semibold text-amber-300 flex items-center gap-1.5">
             <span>📝</span> 界面使用步骤指南：
@@ -60,7 +64,7 @@ function GuidanceCard({ steps, linkages }: { steps: string[]; linkages: string[]
             {linkages.map((l, i) => <li key={i}>{l}</li>)}
           </ul>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }

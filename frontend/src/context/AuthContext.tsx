@@ -3,8 +3,8 @@ import { type User, type UserRole, type Permission } from '../types';
 import { authApi } from '../api';
 
 interface AuthContextType {
-  currentUser: User | null; users: User[]; permissionTick: number;
-  login: (username: string, password: string) => Promise<boolean>; logout: () => void;
+  currentUser: User | null; users: User[]; permissionTick: number; sessionNotice: string;
+  login: (username: string, password: string) => Promise<boolean>; logout: () => void; clearSessionNotice: () => void;
   register: (user: Omit<User, 'id' | 'permissions' | 'createdAt' | 'status'>) => Promise<{ success: boolean; message: string }>;
   approveUser: (userId: string) => Promise<void>; disableUser: (userId: string) => Promise<void>;
   enableUser: (userId: string) => Promise<void>; deleteUser: (userId: string) => Promise<void>;
@@ -28,6 +28,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [users, setUsers] = useState<User[]>([]);
   const [permissionTick, setPermissionTick] = useState(0);
   const [backendAvailable, setBackendAvailable] = useState(false);
+  const [sessionNotice, setSessionNotice] = useState('');
+  const clearSessionNotice = useCallback(() => setSessionNotice(''), []);
+  // 会话失效（401）全局处理：退出登录并在登录页提示原因
+  useEffect(() => {
+    const h = (e: Event) => {
+      setCurrentUser(null);
+      setSessionNotice((e as CustomEvent).detail || '会话已过期，请重新登录');
+    };
+    window.addEventListener('erp:unauthorized', h);
+    return () => window.removeEventListener('erp:unauthorized', h);
+  }, []);
   useEffect(() => { const token = localStorage.getItem('erp_token'); if (!token) return; authApi.getMe().then(res => { setBackendAvailable(true); setCurrentUser(mapBackendUser(res.data)); }).catch(() => setBackendAvailable(false)); }, []);
   const isAdminRef = useRef(false); useEffect(() => { isAdminRef.current = currentUser?.role === 'admin'; }, [currentUser]);
   useEffect(() => { if (!backendAvailable || !currentUser) return; const interval = setInterval(async () => {
@@ -47,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const deleteUser = useCallback(async (id: string) => { await authApi.deleteUser(id); setUsers(prev => prev.filter(u => u.id !== id)); }, []);
   const updateUserPermissions = useCallback(async (id: string, perms: Permission[]) => { await authApi.updatePermissions(id, perms); setUsers(prev => prev.map(u => u.id === id ? { ...u, permissions: perms } : u)); setPermissionTick(t => t + 1); }, []);
   const hasPermission = useCallback((mk: string, act: 'view' | 'add' | 'edit' | 'delete'): boolean => { if (!currentUser) return false; if (currentUser.role === 'admin') return true; const pm = currentUser.permissions.find(x => x.module === mk || x.module === 'all'); if (!pm) return false; switch (act) { case 'view': return pm.canView === true; case 'add': return pm.canAdd === true; case 'edit': return pm.canEdit === true; case 'delete': return pm.canDelete === true; } }, [currentUser]);
-  return <AuthContext.Provider value={{ currentUser, users, permissionTick, login, logout, register: registerFn, approveUser, disableUser, enableUser, deleteUser, updateUserPermissions, hasPermission }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ currentUser, users, permissionTick, sessionNotice, login, logout, clearSessionNotice, register: registerFn, approveUser, disableUser, enableUser, deleteUser, updateUserPermissions, hasPermission }}>{children}</AuthContext.Provider>;
 }
 export function useAuth() { const ctx = useContext(AuthContext); if (!ctx) throw new Error('useAuth inside AuthProvider'); return ctx; }
 function mapBackendUser(bu: any): User { return { id: String(bu.id || ''), username: bu.username || '', password: '', role: (bu.role || 'sales') as UserRole, realName: bu.realName || bu.username || '', phone: bu.phone || '', email: bu.email || '', department: bu.department || '', status: bu.status || 'active', permissions: Array.isArray(bu.permissions) ? bu.permissions : (DEFAULT_ROLE_PERMISSIONS as any)[bu.role] || [], createdAt: bu.createdAt || '', approvedBy: bu.approvedBy }; }

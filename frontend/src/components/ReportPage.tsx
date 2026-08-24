@@ -14,6 +14,7 @@ export default function ReportPage() {
   const [period, setPeriod] = useState<TimePeriod>('monthly');
   const [activeTab, setActiveTab] = useState<string>('sales');
   const [data, setData] = useState<any>(null);
+  const [showGuide, setShowGuide] = useState(false);
   useEffect(() => { bizApi.report().then(r => setData(r.data)).catch(() => setData({})); }, []);
 
   const tabMeta: Record<string, { title: string; icon: string; color: string }> = {
@@ -36,15 +37,18 @@ export default function ReportPage() {
   const kpi = data?.kpi || {};
 
   return (<div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
-    {/* UI 引导与联动卡片 */}
-    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl p-5 text-white shadow-lg space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-base flex items-center gap-2 text-indigo-300">
+    {/* UI 引导与联动卡片（默认收起） */}
+    <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
+      <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
+        <h3 className="font-bold text-sm flex items-center gap-2 text-indigo-300">
           <span>💡</span> 报表中心使用指南与后台数据联动说明
         </h3>
-        <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">全量实时穿透计算</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed">
+        <span className="flex items-center gap-2">
+          <span className="text-[11px] bg-indigo-500/20 text-indigo-300 px-2.5 py-0.5 rounded-full border border-indigo-400/30 font-medium">全量实时穿透计算</span>
+          <span className="text-indigo-300/70 text-xs">{showGuide ? '▲ 收起' : '▼ 展开'}</span>
+        </span>
+      </button>
+      {showGuide && <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-300 leading-relaxed mt-3">
         <div className="bg-white/5 rounded-xl p-3.5 border border-white/10 space-y-1.5">
           <div className="font-semibold text-amber-300 flex items-center gap-1.5">
             <span>📝</span> 步骤指引：
@@ -65,7 +69,7 @@ export default function ReportPage() {
             <li>财务核销与期末关账完成 ➔ 实时更新财务收入支出与净利润 KPI。</li>
           </ul>
         </div>
-      </div>
+      </div>}
     </div>
 
     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h2 className="text-xl font-bold text-gray-800">📊 报表中心</h2><p className="text-sm text-gray-500 mt-1">数据全部来自业务表实时聚合，按周/月/年查看公司运营状况</p></div><div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-sm border border-gray-100">{(['weekly','monthly','yearly'] as TimePeriod[]).map(p=>(<button key={p} onClick={()=>setPeriod(p)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${period===p?'bg-blue-500 text-white shadow-sm':'text-gray-500 hover:bg-gray-50'}`}>{PERIOD_LABELS[p]}</button>))}</div></div>
