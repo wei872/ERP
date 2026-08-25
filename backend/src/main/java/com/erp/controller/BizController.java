@@ -1394,6 +1394,64 @@ public class BizController {
         try { return Double.parseDouble(v.toString()); } catch (Exception e) { return 0; }
     }
 
+    // ── 附件管理：任意业务单据挂载附件（上传/列表/下载/删除） ──
+    @PostMapping("/attachment/upload")
+    public Result attachmentUpload(@RequestParam("file") MultipartFile file,
+                                   @RequestParam("ref_table") String refTable,
+                                   @RequestParam("ref_no") String refNo,
+                                   HttpServletRequest req) {
+        if (file == null || file.isEmpty()) return Result.error("请选择文件");
+        if (!refTable.matches("^[a-z][a-z0-9_]{2,60}$")) return Result.error("无效业务表名");
+        if (file.getSize() > 5 * 1024 * 1024) return Result.error("附件不能超过 5MB");
+        String name = file.getOriginalFilename() == null ? "attachment" : file.getOriginalFilename();
+        if (name.length() > 200) name = name.substring(name.length() - 200);
+        try {
+            db.update("INSERT INTO sys_attachment(ref_table,ref_no,file_name,file_type,file_size,file_data,uploaded_by) VALUES(?,?,?,?,?,?,?)",
+                refTable, refNo, name, file.getContentType(), file.getSize(), file.getBytes(), user(req));
+            audit.log(user(req), "附件", "上传附件", refTable + "/" + refNo + " " + name, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("file_name", name);
+            ret.put("file_size", file.getSize());
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("上传失败: " + e.getMessage()); }
+    }
+
+    @GetMapping("/attachment/list")
+    public Result attachmentList(@RequestParam("ref_table") String refTable, @RequestParam("ref_no") String refNo) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList(
+                "SELECT id, ref_table, ref_no, file_name, file_type, file_size, uploaded_by, created_at FROM sys_attachment WHERE ref_table=? AND ref_no=? ORDER BY id DESC", refTable, refNo);
+            return Result.ok(rows);
+        } catch (Exception e) { return Result.error("附件列表加载失败: " + e.getMessage()); }
+    }
+
+    @GetMapping("/attachment/download/{id}")
+    public ResponseEntity<byte[]> attachmentDownload(@PathVariable Long id, HttpServletRequest req) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT file_name, file_type, file_data FROM sys_attachment WHERE id=?", id);
+            if (rows.isEmpty()) return ResponseEntity.status(404).build();
+            Map<String,Object> r = rows.get(0);
+            byte[] data = (byte[]) r.get("file_data");
+            if (data == null) data = new byte[0];
+            String filename = java.net.URLEncoder.encode(String.valueOf(r.get("file_name")), "UTF-8").replace("+", "%20");
+            String type = r.get("file_type") == null ? "application/octet-stream" : String.valueOf(r.get("file_type"));
+            audit.log(user(req), "附件", "下载附件", "id=" + id, audit.getIp(req));
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(MediaType.parseMediaType(type.startsWith("application/") || type.startsWith("image/") || type.startsWith("text/") ? type : "application/octet-stream"))
+                .body(data);
+        } catch (Exception e) { return ResponseEntity.status(500).build(); }
+    }
+
+    @DeleteMapping("/attachment/{id}")
+    public Result attachmentDelete(@PathVariable Long id, HttpServletRequest req) {
+        try {
+            int n = db.update("DELETE FROM sys_attachment WHERE id=?", id);
+            if (n > 0) audit.log(user(req), "附件", "删除附件", "id=" + id, audit.getIp(req));
+            return n > 0 ? Result.ok("已删除") : Result.error("附件不存在");
+        } catch (Exception e) { return Result.error("删除失败: " + e.getMessage()); }
+    }
+
     // ── 销售目标达成率 ──
     @GetMapping("/target-progress") public Result targetProgress() {
         try {

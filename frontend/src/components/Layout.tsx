@@ -4,7 +4,6 @@ import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
 import { bizApi } from '../api';
 import { getCurrentCompany, setCurrentCompany, type CompanyInfo } from '../utils/company';
-import { t, getLanguage, setLanguage, onLanguageChange, LANG_OPTIONS } from '../utils/i18n';
 import Login from './Login';
 import ModulePage from './ModulePage';
 // 业务页面全部懒加载：recharts 等大依赖不进首屏包，显著加快登录后首帧
@@ -33,6 +32,7 @@ const ProductionTrackingPage = lazy(() => import('./ProductionTrackingPage'));
 const AuditLogSearchPage = lazy(() => import('./AuditLogSearchPage'));
 const DataImportPage = lazy(() => import('./DataImportPage'));
 const SystemMonitorPage = lazy(() => import('./SystemMonitorPage'));
+const MessageCenterPage = lazy(() => import('./MessageCenterPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -42,26 +42,26 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' };
 
-const BIZ_PAGES: Array<{ type: any; label: string; icon: string; i18n?: string; roles: string[] }> = [
-  { type: 'daily',          label: '经营日报',     icon: '📰', i18n: 'nav.daily', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
-  { type: 'workflow',       label: '工作流审批',   icon: '🔁', i18n: 'nav.workflow', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
-  { type: 'mapproval',      label: '移动审批',     icon: '📱', i18n: 'nav.mapproval', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
-  { type: 'tracking',       label: '销售执行跟踪', icon: '🚚', i18n: 'nav.tracking', roles: ['admin','sales','accounting'] },
-  { type: 'import',         label: '数据导入中心', icon: '⬆️', i18n: 'nav.import', roles: ['admin','sales','procurement'] },
-  { type: 'ptracking',      label: '采购执行跟踪', icon: '🛒', i18n: 'nav.ptracking', roles: ['admin','procurement','accounting'] },
-  { type: 'invanalysis',    label: '库存周转分析', icon: '🔄', i18n: 'nav.invanalysis', roles: ['admin','warehouse','accounting'] },
-  { type: 'prodtracking',   label: '生产执行跟踪', icon: '🏗️', i18n: 'nav.prodtracking', roles: ['admin','production','warehouse'] },
-  { type: 'auditsearch',    label: '日志高级检索', icon: '🔎', i18n: 'nav.auditsearch', roles: ['admin'] },
-  { type: 'voucher',        label: '会计凭证',     icon: '📒', i18n: 'nav.voucher', roles: ['admin','accounting'] },
-  { type: 'statements',     label: '三大财务报表', icon: '📊', i18n: 'nav.statements', roles: ['admin','accounting'] },
-  { type: 'reconciliation', label: '应收应付核销', icon: '💸', i18n: 'nav.reconciliation', roles: ['admin','accounting'] },
+const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
+  { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
+  { type: 'workflow',       label: '工作流审批',   icon: '🔁', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
+  { type: 'mapproval',      label: '移动审批',     icon: '📱', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
+  { type: 'tracking',       label: '销售执行跟踪', icon: '🚚', roles: ['admin','sales','accounting'] },
+  { type: 'import',         label: '数据导入中心', icon: '⬆️', roles: ['admin','sales','procurement'] },
+  { type: 'ptracking',      label: '采购执行跟踪', icon: '🛒', roles: ['admin','procurement','accounting'] },
+  { type: 'invanalysis',    label: '库存周转分析', icon: '🔄', roles: ['admin','warehouse','accounting'] },
+  { type: 'prodtracking',   label: '生产执行跟踪', icon: '🏗️', roles: ['admin','production','warehouse'] },
+  { type: 'auditsearch',    label: '日志高级检索', icon: '🔎', roles: ['admin'] },
+  { type: 'voucher',        label: '会计凭证',     icon: '📒', roles: ['admin','accounting'] },
+  { type: 'statements',     label: '三大财务报表', icon: '📊', roles: ['admin','accounting'] },
+  { type: 'reconciliation', label: '应收应付核销', icon: '💸', roles: ['admin','accounting'] },
   { type: 'profit',         label: '毛利分析',     icon: '💹', roles: ['admin','accounting','sales'] },
-  { type: 'production',     label: '生产管理',     icon: '🏗️', i18n: 'nav.production', roles: ['admin','production','warehouse'] },
-  { type: 'mrp',            label: 'MRP运算',      icon: '🧮', i18n: 'nav.mrp', roles: ['admin','production'] },
-  { type: 'ops',            label: '库存直调&期末', icon: '🛠️', i18n: 'nav.ops', roles: ['admin','warehouse','accounting'] },
-  { type: 'audit',          label: '审计日志',     icon: '🕵️', i18n: 'nav.audit', roles: ['admin'] },
+  { type: 'production',     label: '生产管理',     icon: '🏗️', roles: ['admin','production','warehouse'] },
+  { type: 'mrp',            label: 'MRP运算',      icon: '🧮', roles: ['admin','production'] },
+  { type: 'ops',            label: '库存直调&期末', icon: '🛠️', roles: ['admin','warehouse','accounting'] },
+  { type: 'audit',          label: '审计日志',     icon: '🕵️', roles: ['admin'] },
 ];
 
 export default function Layout() {
@@ -99,6 +99,7 @@ export default function Layout() {
     { label: '库存周转分析', icon: '🔄', page: { type: 'invanalysis' } },
     { label: '生产执行跟踪', icon: '🏗️', page: { type: 'prodtracking' } },
     { label: '日志高级检索', icon: '🔎', page: { type: 'auditsearch' } },
+    { label: '消息中心', icon: '📬', page: { type: 'messages' } },
     { label: '报表中心', icon: '📈', page: { type: 'report' } },
     { label: '工作流审批', icon: '🔁', page: { type: 'workflow' } },
     { label: '会计凭证', icon: '📒', page: { type: 'voucher' } },
@@ -166,9 +167,6 @@ export default function Layout() {
 
   // ── 移动端全局搜索（全屏层） ──
   const [mobileSearch, setMobileSearch] = useState(false);
-  // 语言切换即刷新（i18n）
-  const [, forceLang] = useState(0);
-  useEffect(() => onLanguageChange(() => forceLang(x => x + 1)), []);
   // ── 多公司（账套）上下文切换 ──
   const [companies, setCompanies] = useState<any[]>([]);
   const [curCompany, setCurCompany] = useState<CompanyInfo>(getCurrentCompany());
@@ -251,6 +249,7 @@ export default function Layout() {
     if (page.type === 'invanalysis') return '🔄 库存周转分析';
     if (page.type === 'prodtracking') return '🏗️ 生产执行跟踪';
     if (page.type === 'auditsearch') return '🔎 操作日志高级检索';
+    if (page.type === 'messages') return '📬 消息中心';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -264,33 +263,33 @@ export default function Layout() {
       style={isMobile ? undefined : { boxShadow: '4px 0 24px -8px rgba(0,0,0,0.3)' }}>
       <div className="flex items-center gap-3 px-4 h-16 border-b border-white/10 shrink-0">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-white font-bold text-base" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 12px rgba(99,102,241,0.4)' }}>E</div>
-        {expanded && <div className="min-w-0"><h1 className="text-white font-bold text-sm leading-tight tracking-tight">{t('app.title')}</h1><p className="text-slate-400 text-[10px] mt-0.5">{tables.length} 张表 · {Object.keys(tree).length} 个模块</p></div>}
+        {expanded && <div className="min-w-0"><h1 className="text-white font-bold text-sm leading-tight tracking-tight">ERP 管理系统</h1><p className="text-slate-400 text-[10px] mt-0.5">{tables.length} 张表 · {Object.keys(tree).length} 个模块</p></div>}
       </div>
       <nav className="flex-1 overflow-y-auto py-2 px-2">
-        {([['dashboard','nav.dashboard','📊'],['report','nav.report','📈'],['finance','nav.finance','💰']] as const).map(([type, label, icon]) => (
-          <button key={type} onClick={() => go({ type: type as any })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{icon}</span>{expanded && <span>{t(label)}</span>}</button>
+        {([['dashboard','控制台','📊'],['report','报表中心','📈'],['finance','财务模版','💰']] as const).map(([type, label, icon]) => (
+          <button key={type} onClick={() => go({ type: type as any })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{icon}</span>{expanded && <span>{label}</span>}</button>
         ))}
-        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{expanded && <span className="flex items-center gap-2">{t('nav.users')}{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
-        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{expanded && <span>{t('nav.rbac')}</span>}</button>)}
-        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'dicts' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'dicts' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">📖</span>{expanded && <span>{t('nav.dicts')}</span>}</button>)}
-        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'recycle' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'recycle' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🗑️</span>{expanded && <span>{t('nav.recycle')}</span>}</button>)}
-        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'monitor' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'monitor' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">📡</span>{expanded && <span>{t('nav.monitor')}</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{expanded && <span className="flex items-center gap-2">用户管理{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{expanded && <span>RBAC 权限矩阵</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'dicts' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'dicts' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">📖</span>{expanded && <span>数据字典维护</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'recycle' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'recycle' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🗑️</span>{expanded && <span>操作回收站</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'monitor' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'monitor' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">📡</span>{expanded && <span>系统运行监控</span>}</button>)}
         {expanded && favTables.length > 0 && (<div className="mb-1">
-          <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">⭐ {t('section.fav')}</div>
+          <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">⭐ 常用收藏</div>
           {favTables.map(tk => { const t = tables.find(x => x.table === tk); if (!t) return null; return (
             <button key={tk} onClick={() => go({ type: 'table', tableKey: tk })} className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium transition-all mb-0.5 ${page.type === 'table' && page.tableKey === tk ? 'bg-amber-400/15 text-amber-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}>
               <span className="shrink-0">⭐</span><span className="truncate">{t.cnName}</span>
             </button>
           ); })}
         </div>)}
-        {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">{t('section.biz')}</div>}
+        {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">业务操作</div>}
         {expanded && BIZ_PAGES.filter(b => b.roles.includes(currentUser.role)).map(b => (
-          <button key={b.type} onClick={() => go({ type: b.type })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{b.icon}</span><span>{b.i18n ? t(b.i18n) : b.label}</span></button>
+          <button key={b.type} onClick={() => go({ type: b.type })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">{b.icon}</span><span>{b.label}</span></button>
         ))}
         {!sidebarOpen && BIZ_PAGES.filter(b => b.roles.includes(currentUser.role)).slice(0, 4).map(b => (
           <button key={b.type} onClick={() => go({ type: b.type })} className={`w-full flex items-center justify-center py-2.5 rounded-lg text-base transition-all mb-0.5 ${page.type === b.type ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5'}`} title={b.label}><span>{b.icon}</span></button>
         ))}
-        {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">{t('section.data')}</div>}
+        {expanded && <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">数据模块</div>}
         {expanded && visibleModules.map(mod => {
           const subs = tree[mod]; if (!subs) return null;
           const isExpanded = expandedMods.has(mod);
@@ -335,11 +334,6 @@ export default function Layout() {
           )}
         </div>
         <div className="flex items-center gap-1.5 sm:gap-3">
-          {/* 语言切换 */}
-          <select value={getLanguage()} onChange={e => setLanguage(e.target.value as any)} title="语言 / Language"
-            className="hidden sm:block text-xs border border-slate-200 rounded-lg px-1.5 py-1.5 bg-white text-slate-600 outline-none focus:border-indigo-400 cursor-pointer">
-            {LANG_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.value === 'zh-CN' ? '🇨🇳 中文' : '🇬🇧 EN'}</option>)}
-          </select>
           {/* 公司（账套）切换 */}
           {companies.length > 1 && (
             <select value={curCompany.company_code} onChange={e => switchCompany(e.target.value)} title="切换公司账套"
@@ -429,7 +423,7 @@ export default function Layout() {
           )}
         </div>
       </header>
-      <main className="flex-1 overflow-auto bg-slate-50 erp-fade-in">
+      <main className="flex-1 overflow-auto bg-slate-50 erp-fade-in pb-16 md:pb-0">
         <Suspense fallback={<PageFallback />}>
         {page.type === 'dashboard' && <Dashboard />}{page.type === 'report' && <ReportPage />}
         {page.type === 'finance' && <FinanceTemplate />}
@@ -454,12 +448,35 @@ export default function Layout() {
         {page.type === 'invanalysis' && <InventoryAnalysisPage />}
         {page.type === 'prodtracking' && <ProductionTrackingPage />}
         {page.type === 'auditsearch' && <AuditLogSearchPage />}
+        {page.type === 'messages' && <MessageCenterPage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage key={page.tableKey + '|' + (page.search || '')} tableKey={page.tableKey} initialSearch={page.search || ''} />}
         </Suspense>
       </main>
+      {/* 移动端底部导航栏（App 式体验） */}
+      {isMobile && !bigScreen && (
+        <nav className="fixed bottom-0 inset-x-0 z-[120] bg-white/95 backdrop-blur-md border-t border-slate-200 flex items-stretch justify-around px-1 pb-[env(safe-area-inset-bottom)] md:hidden">
+          {([
+            { type: 'dashboard', icon: '🏠', label: '首页' },
+            { type: 'daily', icon: '📰', label: '日报' },
+            { type: 'messages', icon: '📬', label: '消息' },
+            { type: 'workflow', icon: '🔁', label: '审批' },
+          ] as const).map(item => (
+            <button key={item.type} onClick={() => go({ type: item.type as any })}
+              className={`flex-1 flex flex-col items-center gap-0.5 py-2 rounded-lg transition-colors ${page.type === item.type ? 'text-indigo-600' : 'text-slate-400 active:text-indigo-500'}`}>
+              <span className="text-lg leading-none">{item.icon}</span>
+              <span className="text-[10px] font-medium">{item.label}</span>
+            </button>
+          ))}
+          <button onClick={() => setBigScreen(true)} className="flex-1 flex flex-col items-center gap-0.5 py-2 rounded-lg text-slate-400 active:text-indigo-500 transition-colors">
+            <span className="text-lg leading-none">📺</span>
+            <span className="text-[10px] font-medium">大屏</span>
+          </button>
+        </nav>
+      )}
+
       {bigScreen && <Suspense fallback={null}><BigScreen onExit={() => setBigScreen(false)} /></Suspense>}
 
       {/* 移动端全局搜索全屏层 */}

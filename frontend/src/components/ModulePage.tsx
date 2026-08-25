@@ -8,7 +8,18 @@ import { useTableMeta, statusBadgeClass } from '../meta/store';
 const SummaryPanel = lazy(() => import('./SummaryPanel'));
 const DetailDrilldown = lazy(() => import('./DetailDrilldown'));
 const DocPrintModal = lazy(() => import('./DocPrintModal'));
+const AttachmentModal = lazy(() => import('./AttachmentModal'));
 import { downloadCsv } from '../utils/csv';
+
+/** 附件关联键：哪些表支持挂载附件，以及各自的单据号列 */
+const ATTACH_REF: Record<string, string> = {
+  trade_sales_main: 'sales_no', trade_purchase_main: 'purchase_no',
+  trade_stock_in_main: 'in_no', trade_stock_out_main: 'out_no',
+  voucher_main: 'voucher_no', prod_work_order: 'work_order_no',
+  prod_quotation: 'quote_no', cust_contract_main: 'contract_no',
+  finance_receivable_main: 'receivable_no', finance_payable_main: 'payable_no',
+  trade_sales_return: 'return_no',
+};
 
 /** 主单 → 明细钻取配置：单据行一键展开明细（复用后端搜索按关联键检索） */
 const DRILL_CFG: Record<string, { detail: string; key: string; label: string }> = {
@@ -57,6 +68,8 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
   const [linkNo, setLinkNo] = useState('');
   // 主单明细钻取
   const [drillKey, setDrillKey] = useState('');
+  // 单据附件
+  const [attachRefNo, setAttachRefNo] = useState('');
   // 单据套打
   const [printRow, setPrintRow] = useState<Record<string, any> | null>(null);
   // Excel 批量导入（商品/客户）
@@ -448,6 +461,7 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
                   {tableKey === 'prod_quotation' && ['已报价', '待审核'].includes(String((row as any).audit_status)) && <button onClick={() => doQuoteApprove(String((row as any).quote_no))} className="px-2.5 py-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors font-medium">✓ 审批</button>}
                   {tableKey === 'prod_quotation' && String((row as any).audit_status) === '已通过' && <button onClick={() => doQuoteToSale(String((row as any).quote_no))} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">🔁 转订单</button>}
                   {tableKey === 'trade_sales_main' && ['已出库', '已完成'].includes(String((row as any).shipping_status)) && <button onClick={() => doSalesReturn(String((row as any).sales_no))} className="px-2.5 py-1 text-[11px] text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-md transition-colors font-medium">↩ 退货</button>}
+                  {ATTACH_REF[tableKey] && (row as any)[ATTACH_REF[tableKey]] && <button onClick={() => setAttachRefNo(String((row as any)[ATTACH_REF[tableKey]]))} className="px-2.5 py-1 text-[11px] text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors font-medium">📎 附件</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
@@ -590,6 +604,13 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
           <div className="px-6 py-3 border-t bg-slate-50/60 text-[11px] text-slate-400">明细行由业务录入/自动联动生成；主单金额 = 全部明细行金额之和（修改明细会自动重算主单）。</div>
         </div>
       </div>
+    )}
+
+    {/* 单据附件弹窗 */}
+    {attachRefNo && (
+      <Suspense fallback={null}>
+        <AttachmentModal tableKey={tableKey} refNo={attachRefNo} onClose={() => setAttachRefNo('')} />
+      </Suspense>
     )}
 
     {/* 单据套打弹窗 */}

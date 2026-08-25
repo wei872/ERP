@@ -246,6 +246,23 @@ CREATE TABLE IF NOT EXISTS finance_voucher_template (
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('finance_voucher_template','凭证模板','财务管理','凭证模板',915);
 
+-- ── 附件管理：任意业务单据可挂载图片/文件附件 ──
+CREATE TABLE IF NOT EXISTS sys_attachment (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  ref_table VARCHAR(64) COMMENT '关联业务表',
+  ref_no VARCHAR(64) COMMENT '关联单据号',
+  file_name VARCHAR(200) COMMENT '原始文件名',
+  file_type VARCHAR(50) COMMENT 'MIME 类型',
+  file_size BIGINT DEFAULT 0 COMMENT '字节数',
+  file_data LONGBLOB COMMENT '文件内容',
+  uploaded_by VARCHAR(50),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_att_ref (ref_table, ref_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('sys_attachment','附件管理','系统维护','附件管理',916);
+
 INSERT IGNORE INTO finance_voucher_template(template_name, description, lines_json, created_by) VALUES
 ('提现备用金', '从银行提取现金作为备用金（借:1001 库存现金 / 贷:1002 银行存款）',
  '[{"subject_code":"1001","subject_name":"库存现金","debit_amount":5000,"credit_amount":0,"summary":"提现备用金"},{"subject_code":"1002","subject_name":"银行存款","debit_amount":0,"credit_amount":5000,"summary":"提现备用金"}]', '系统'),

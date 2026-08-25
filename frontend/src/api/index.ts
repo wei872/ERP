@@ -102,6 +102,20 @@ export const bizApi = {
     return request<{ total: number; rows: any[]; modules: any[] }>(`/biz/audit-search?${q.toString()}`);
   },
   reportExcelAll: (period: string) => downloadBlob(`/biz/report/excel-all?period=${encodeURIComponent(period)}`, `财务报表_${period}.xlsx`),
+  attachmentUpload: async (refTable: string, refNo: string, file: File) => {
+    const token = localStorage.getItem('erp_token');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('ref_table', refTable);
+    fd.append('ref_no', refNo);
+    const res = await fetch(`${BASE}/biz/attachment/upload`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message || '上传失败');
+    return json;
+  },
+  attachmentList: (refTable: string, refNo: string) => request<any[]>(`/biz/attachment/list?ref_table=${encodeURIComponent(refTable)}&ref_no=${encodeURIComponent(refNo)}`),
+  attachmentDownload: (id: number, filename: string) => downloadBlob(`/biz/attachment/download/${id}`, filename),
+  attachmentDelete: (id: number) => request(`/biz/attachment/${id}`, { method: 'DELETE' }),
   systemMonitor: () => request<any>('/biz/system-monitor'),
   backupSql: () => downloadBlob('/biz/backup', `erp_backup_${new Date().toISOString().slice(0, 10)}.sql`),
   importOrders: async (type: 'sales' | 'purchase', file: File) => {
