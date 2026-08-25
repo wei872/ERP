@@ -24,21 +24,23 @@ export default function ReconciliationPage() {
   // 核销 modal
   const [active, setActive] = useState<Row | null>(null);
   const [amount, setAmount] = useState(0);
-  // 对账单打印
-  const [statement, setStatement] = useState<{ customer: string; items: Row[] } | null>(null);
+  // 对账单打印（客户应收 / 供应商应付 双向）
+  const [statement, setStatement] = useState<{ kind: 'receivable' | 'payable'; party: string; items: Row[] } | null>(null);
 
   const doPrintStatement = async () => {
-    if (tab !== 'receivable') return;
-    const customers = Array.from(new Set(rows.map(r => String(r.customer_name || '')))).filter(Boolean);
-    if (customers.length === 0) { toastNotify('当前无应收单可打印对账单', 'warn'); return; }
-    const target = window.prompt(`请输入要打印对账单的客户名称：\n（现有：${customers.slice(0, 6).join('、')}${customers.length > 6 ? '…' : ''}）`, customers[0]);
+    const isRcv = tab === 'receivable';
+    const partyField = isRcv ? 'customer_name' : 'supplier_name';
+    const table = isRcv ? 'finance_receivable_main' : 'finance_payable_main';
+    const parties = Array.from(new Set(rows.map(r => String((r as any)[partyField] || '')))).filter(Boolean);
+    if (parties.length === 0) { toastNotify(`当前无${isRcv ? '应收' : '应付'}单可打印对账单`, 'warn'); return; }
+    const target = window.prompt(`请输入要打印对账单的${isRcv ? '客户' : '供应商'}名称：\n（现有：${parties.slice(0, 6).join('、')}${parties.length > 6 ? '…' : ''}）`, parties[0]);
     if (!target) return;
     try {
-      const r = await dataApi.list('finance_receivable_main', 1, 200, target.trim());
-      const items = (r.data?.rows || []).filter((x: any) => String(x.customer_name) === target.trim());
-      if (items.length === 0) { toastNotify('未找到该客户的应收单', 'warn'); return; }
-      setStatement({ customer: target.trim(), items });
-    } catch (e: any) { toastFn('查询失败：' + (e.message || '')); }
+      const r = await dataApi.list(table, 1, 200, target.trim());
+      const items = (r.data?.rows || []).filter((x: any) => String(x[partyField]) === target.trim());
+      if (items.length === 0) { toastNotify(`未找到该${isRcv ? '客户' : '供应商'}的单据`, 'warn'); return; }
+      setStatement({ kind: tab, party: target.trim(), items });
+    } catch (e: any) { toastNotify('查询失败：' + (e.message || '')); }
   };
 
   const toastFn = useCallback((m: string) => toastNotify(m), []);
@@ -130,7 +132,7 @@ export default function ReconciliationPage() {
           <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索单号/客户/供应商..." className="px-3 py-2 border rounded-lg text-sm w-64"/>
         </div>
         <button onClick={load} disabled={loading} className="px-4 py-2 bg-white border rounded-lg text-sm">↻ 刷新</button>
-        {tab === 'receivable' && <button onClick={doPrintStatement} title="按客户打印应收对账单" className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700">🖨️ 打印对账单</button>}
+        <button onClick={doPrintStatement} title={tab === 'receivable' ? '按客户打印应收对账单' : '按供应商打印应付对账单'} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700">🖨️ 打印对账单</button>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -256,16 +258,19 @@ export default function ReconciliationPage() {
         </div>
       )}
 
-      {/* 客户对账单打印弹窗 */}
+      {/* 对账单打印弹窗（客户应收 / 供应商应付） */}
       {statement && (() => {
+        const isRcv = statement.kind === 'receivable';
+        const paidField = isRcv ? 'received_amount' : 'paid_amount';
+        const noField = isRcv ? 'receivable_no' : 'payable_no';
         const total = statement.items.reduce((s, r) => s + (Number(r.total_amount) || 0), 0);
-        const received = statement.items.reduce((s, r) => s + (Number(r.received_amount) || 0), 0);
+        const received = statement.items.reduce((s, r) => s + (Number((r as any)[paidField]) || 0), 0);
         const remain = statement.items.reduce((s, r) => s + (Number(r.remain_amount) || 0), 0);
         return (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[95] p-4" onClick={() => setStatement(null)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
               <div className="px-6 py-3 border-b flex items-center justify-between no-print shrink-0">
-                <h3 className="font-bold text-slate-800 text-sm">🖨️ 客户对账单预览 · {statement.customer}</h3>
+                <h3 className="font-bold text-slate-800 text-sm">🖨️ {isRcv ? '客户对账单' : '供应商对账单'}预览 · {statement.party}</h3>
                 <div className="flex gap-2">
                   <button onClick={() => window.print()} className="px-4 py-1.5 rounded-lg bg-slate-800 text-white text-xs font-medium hover:bg-slate-700">打印</button>
                   <button onClick={() => setStatement(null)} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-xs hover:bg-slate-200">关闭</button>
@@ -274,33 +279,33 @@ export default function ReconciliationPage() {
               <div className="p-8 overflow-y-auto flex-1 print-area">
                 <div className="text-center mb-6">
                   <p className="text-sm font-semibold text-slate-700 tracking-widest">{getCurrentCompanyName()}</p>
-                  <h1 className="text-xl font-bold tracking-[0.3em] text-slate-800 mt-1">客 户 对 账 单</h1>
+                  <h1 className="text-xl font-bold tracking-[0.3em] text-slate-800 mt-1">{isRcv ? '客 户 对 账 单' : '供 应 商 对 账 单'}</h1>
                   <p className="text-[11px] text-slate-400 mt-1">打印时间：{new Date().toLocaleString('zh-CN')}</p>
                 </div>
                 <div className="flex justify-between text-xs text-slate-600 mb-3">
-                  <span>客户名称：<b>{statement.customer}</b></span>
+                  <span>{isRcv ? '客户名称' : '供应商名称'}：<b>{statement.party}</b></span>
                   <span>单据笔数：<b>{statement.items.length}</b></span>
                 </div>
                 <table className="w-full text-xs border-collapse mb-4">
                   <thead>
                     <tr className="bg-slate-50">
-                      <th className="border border-slate-300 px-2 py-1.5">应收单号</th>
+                      <th className="border border-slate-300 px-2 py-1.5">{isRcv ? '应收单号' : '应付单号'}</th>
                       <th className="border border-slate-300 px-2 py-1.5">日期</th>
                       <th className="border border-slate-300 px-2 py-1.5">到期日</th>
-                      <th className="border border-slate-300 px-2 py-1.5 text-right">应收金额</th>
-                      <th className="border border-slate-300 px-2 py-1.5 text-right">已收款</th>
-                      <th className="border border-slate-300 px-2 py-1.5 text-right">未收余额</th>
+                      <th className="border border-slate-300 px-2 py-1.5 text-right">{isRcv ? '应收金额' : '应付金额'}</th>
+                      <th className="border border-slate-300 px-2 py-1.5 text-right">{isRcv ? '已收款' : '已付款'}</th>
+                      <th className="border border-slate-300 px-2 py-1.5 text-right">{isRcv ? '未收余额' : '未付余额'}</th>
                       <th className="border border-slate-300 px-2 py-1.5">状态</th>
                     </tr>
                   </thead>
                   <tbody>
                     {statement.items.map((r, i) => (
                       <tr key={i}>
-                        <td className="border border-slate-300 px-2 py-1.5 font-mono">{String(r.receivable_no)}</td>
+                        <td className="border border-slate-300 px-2 py-1.5 font-mono">{String((r as any)[noField])}</td>
                         <td className="border border-slate-300 px-2 py-1.5">{String(r.created_at || '').slice(0, 10)}</td>
                         <td className="border border-slate-300 px-2 py-1.5">{String(r.due_date || '').slice(0, 10)}</td>
                         <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums">{fmt(r.total_amount)}</td>
-                        <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums">{fmt(r.received_amount)}</td>
+                        <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums">{fmt((r as any)[paidField])}</td>
                         <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums font-medium">{fmt(r.remain_amount)}</td>
                         <td className="border border-slate-300 px-2 py-1.5">{String(r.status)}</td>
                       </tr>
@@ -314,10 +319,12 @@ export default function ReconciliationPage() {
                     </tr>
                   </tbody>
                 </table>
-                <p className="text-xs text-slate-500 mb-8">截至打印日，贵司未结清余额为 <b className="text-slate-800">¥{fmt(remain)}</b>。如有异议请于 7 个工作日内与我司财务部联系核对。</p>
+                <p className="text-xs text-slate-500 mb-8">{isRcv
+                  ? <>截至打印日，贵司未结清余额为 <b className="text-slate-800">¥{fmt(remain)}</b>。如有异议请于 7 个工作日内与我司财务部联系核对。</>
+                  : <>截至打印日，我司对贵司未结清应付余额为 <b className="text-slate-800">¥{fmt(remain)}</b>。如有异议请于 7 个工作日内与我司财务部联系核对。</>}</p>
                 <div className="grid grid-cols-2 gap-8 text-xs text-slate-500">
-                  <div>供方（盖章）：{getCurrentCompanyName()}<br/><br/>经办人：__________</div>
-                  <div>客方（确认）：{statement.customer}<br/><br/>经办人：__________</div>
+                  <div>{isRcv ? '供方' : '需方'}（盖章）：{getCurrentCompanyName()}<br/><br/>经办人：__________</div>
+                  <div>{isRcv ? '客方' : '供方'}（确认）：{statement.party}<br/><br/>经办人：__________</div>
                 </div>
               </div>
             </div>

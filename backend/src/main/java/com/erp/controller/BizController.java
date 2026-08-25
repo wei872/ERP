@@ -838,6 +838,197 @@ public class BizController {
         } catch (Exception e) { return Result.error("生成采购建议单失败: " + e.getMessage()); }
     }
 
+    // ── 销售订单执行跟踪：下单 → 审核 → 出库 → 回款 四段进度 ──
+    @GetMapping("/sales-tracking") public Result salesTracking() {
+        try {
+            List<Map<String,Object>> sales = db.queryForList("SELECT * FROM trade_sales_main ORDER BY id DESC LIMIT 25");
+            // 应收回款进度（按单号归集，备注格式：销售单:SO-xxx）
+            Map<String, java.math.BigDecimal[]> rcvMap = new LinkedHashMap<>();
+            try {
+                for (Map<String,Object> r : db.queryForList("SELECT remark, COALESCE(SUM(total_amount),0) t, COALESCE(SUM(remain_amount),0) rm FROM finance_receivable_main GROUP BY remark")) {
+                    String remark = String.valueOf(r.getOrDefault("remark", ""));
+                    int idx = remark.indexOf(':');
+                    if (idx >= 0 && idx < remark.length() - 1) {
+                        rcvMap.put(remark.substring(idx + 1), new java.math.BigDecimal[]{ new java.math.BigDecimal(r.get("t").toString()), new java.math.BigDecimal(r.get("rm").toString()) });
+                    }
+                }
+            } catch (Exception ignored) {}
+            List<Map<String,Object>> rows = new ArrayList<>();
+            for (Map<String,Object> s : sales) {
+                String salesNo = String.valueOf(s.get("sales_no"));
+                String salesStatus = String.valueOf(s.getOrDefault("sales_status", ""));
+                String shipStatus = String.valueOf(s.getOrDefault("shipping_status", ""));
+                int stage = 0; // 0 下单
+                if ("已审核".equals(salesStatus) || "已完成".equals(salesStatus)) stage = 1;
+                if ("已出库".equals(shipStatus) || "已发货".equals(shipStatus)) stage = 2;
+                java.math.BigDecimal rcvTotal = java.math.BigDecimal.ZERO, rcvRemain = java.math.BigDecimal.ZERO;
+                java.math.BigDecimal[] rcv = rcvMap.get(salesNo);
+                boolean paidOff = false;
+                if (rcv != null) {
+                    rcvTotal = rcv[0]; rcvRemain = rcv[1];
+                    if (rcvTotal.signum() > 0 && rcvRemain.signum() == 0) { paidOff = true; stage = 3; }
+                }
+                Map<String,Object> row = new LinkedHashMap<>();
+                row.put("sales_no", salesNo);
+                row.put("customer_name", s.get("customer_name"));
+                row.put("total_amount", s.get("total_amount"));
+                row.put("sales_date", s.get("sales_date"));
+                row.put("sales_status", salesStatus);
+                row.put("shipping_status", shipStatus);
+                row.put("stage", stage);
+                row.put("paid_off", paidOff);
+                row.put("rcv_total", rcvTotal);
+                row.put("rcv_remain", rcvRemain);
+                row.put("rcv_progress", rcvTotal.signum() > 0
+                    ? rcvTotal.subtract(rcvRemain).multiply(new java.math.BigDecimal("100")).divide(rcvTotal, 0, java.math.RoundingMode.HALF_UP)
+                    : java.math.BigDecimal.ZERO);
+                rows.add(row);
+            }
+            return Result.ok(rows);
+        } catch (Exception e) { return Result.error("销售跟踪加载失败: " + e.getMessage()); }
+    }
+
+    // ── 系统运行监控：健康 + JVM + 审计统计 ──
+    @GetMapping("/system-monitor") public Result systemMonitor(HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        Map<String,Object> ret = new LinkedHashMap<>();
+        try {
+            Map<String,Object> health = new LinkedHashMap<>();
+            Runtime rt = Runtime.getRuntime();
+            health.put("uptime_seconds", java.lang.management.ManagementFactory.getRuntimeMXBean().getUptime() / 1000);
+            health.put("heap_used_mb", (rt.totalMemory() - rt.freeMemory()) / 1024 / 1024);
+            health.put("heap_max_mb", rt.maxMemory() / 1024 / 1024);
+            health.put("threads", Thread.activeCount());
+            long t0 = System.currentTimeMillis();
+            try { db.queryForObject("SELECT 1", Integer.class); health.put("db_latency_ms", System.currentTimeMillis() - t0); health.put("db", "UP"); }
+            catch (Exception e) { health.put("db", "DOWN"); health.put("db_latency_ms", -1); }
+            try { health.put("table_count", db.queryForObject("SELECT COUNT(*) FROM sys_table_registry", Long.class)); } catch (Exception e) { health.put("table_count", 0); }
+            ret.put("health", health);
+            Map<String,Object> auditStats = new LinkedHashMap<>();
+            try {
+                auditStats.put("ops_today", db.queryForObject("SELECT COUNT(*) FROM sys_log_operation WHERE DATE(created_at)=CURDATE()", Long.class));
+                auditStats.put("logins_today", db.queryForObject("SELECT COUNT(*) FROM sys_login_log WHERE DATE(login_time)=CURDATE() AND login_status='成功'", Long.class));
+                auditStats.put("login_fails_today", db.queryForObject("SELECT COUNT(*) FROM sys_login_log WHERE DATE(login_time)=CURDATE() AND login_status LIKE '失败%'", Long.class));
+                auditStats.put("ops_7d", db.queryForObject("SELECT COUNT(*) FROM sys_log_operation WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)", Long.class));
+                auditStats.put("top_users", db.queryForList("SELECT username, COUNT(*) cnt FROM sys_log_operation WHERE DATE(created_at)=CURDATE() GROUP BY username ORDER BY cnt DESC LIMIT 5"));
+                auditStats.put("top_modules", db.queryForList("SELECT module, COUNT(*) cnt FROM sys_log_operation WHERE DATE(created_at)=CURDATE() GROUP BY module ORDER BY cnt DESC LIMIT 5"));
+            } catch (Exception e) { /* 审计表缺失时保持空 */ }
+            ret.put("audit", auditStats);
+            Map<String,Object> info = new LinkedHashMap<>();
+            info.put("version", "5.19");
+            info.put("java", System.getProperty("java.version"));
+            ret.put("info", info);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("监控数据加载失败: " + e.getMessage()); }
+    }
+
+    // ── 销售/采购订单 Excel 批量导入（同一对方名称的多行合并为一张订单） ──
+    @PostMapping("/import-orders/{type}")
+    @Transactional
+    public Result importOrders(@PathVariable String type, @RequestParam("file") MultipartFile file, HttpServletRequest req) {
+        boolean isSales = "sales".equals(type);
+        if (!"sales".equals(type) && !"purchase".equals(type)) return Result.error("不支持的导入类型: " + type);
+        if (isSales && !"admin".equals(role(req)) && !"sales".equals(role(req))) return Result.error("权限不足");
+        if (!isSales && !"admin".equals(role(req)) && !"procurement".equals(role(req))) return Result.error("权限不足");
+        if (file == null || file.isEmpty()) return Result.error("请上传文件");
+        String fname = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        if (!fname.endsWith(".xlsx") && !fname.endsWith(".xls")) return Result.error("仅支持 .xlsx / .xls 文件");
+        try (org.apache.poi.ss.usermodel.Workbook wb = org.apache.poi.ss.usermodel.WorkbookFactory.create(file.getInputStream())) {
+            org.apache.poi.ss.usermodel.Sheet sh = wb.getSheetAt(0);
+            if (sh == null || sh.getLastRowNum() < 1) return Result.error("工作表为空（第 1 行须为表头）");
+            org.apache.poi.ss.usermodel.DataFormatter fmt = new org.apache.poi.ss.usermodel.DataFormatter();
+            // 表头映射
+            Map<String, Integer> head = new LinkedHashMap<>();
+            org.apache.poi.ss.usermodel.Row hr = sh.getRow(0);
+            if (hr != null) for (int c = 0; c < hr.getLastCellNum(); c++) {
+                String v = cellStr(hr.getCell(c)).trim();
+                if (!v.isEmpty()) head.put(v, c);
+            }
+            String partyCol = isSales ? "客户名称" : "供应商名称";
+            if (!head.containsKey(partyCol) || !head.containsKey("商品编码")) return Result.error("表头缺少必需列：" + partyCol + " / 商品编码");
+            // 按对方名称分组
+            Map<String, List<String[]>> groups = new LinkedHashMap<>();
+            Map<String, java.math.BigDecimal> groupAmount = new LinkedHashMap<>();
+            List<String> errors = new ArrayList<>();
+            for (int r = 1; r <= sh.getLastRowNum(); r++) {
+                org.apache.poi.ss.usermodel.Row row = sh.getRow(r);
+                if (row == null) continue;
+                String party = at(row, partyCol);
+                String pCode = cellAt(row, head, "商品编码", fmt);
+                if (party.isEmpty() && pCode.isEmpty()) continue;
+                if (party.isEmpty() || pCode.isEmpty()) { if (errors.size() < 5) errors.add("第 " + (r + 1) + " 行：" + partyCol + " 或 商品编码 缺失，已跳过"); continue; }
+                java.math.BigDecimal qty;
+                java.math.BigDecimal price;
+                try { qty = new java.math.BigDecimal(cellAt(row, head, "数量", fmt).isEmpty() ? "1" : cellAt(row, head, "数量", fmt)); }
+                catch (Exception e) { if (errors.size() < 5) errors.add("第 " + (r + 1) + " 行：数量格式错误，已跳过"); continue; }
+                try { price = new java.math.BigDecimal(cellAt(row, head, "单价", fmt).isEmpty() ? "0" : cellAt(row, head, "单价", fmt)); }
+                catch (Exception e) { if (errors.size() < 5) errors.add("第 " + (r + 1) + " 行：单价格式错误，已跳过"); continue; }
+                if (qty.signum() <= 0) { if (errors.size() < 5) errors.add("第 " + (r + 1) + " 行：数量须大于 0，已跳过"); continue; }
+                String pName = cellAt(row, head, "商品名称", fmt);
+                if (pName.isEmpty()) {
+                    try {
+                        List<Map<String,Object>> g = db.queryForList("SELECT product_name FROM trade_goods_main WHERE product_code=?", pCode);
+                        if (!g.isEmpty() && g.get(0).get("product_name") != null) pName = String.valueOf(g.get(0).get("product_name"));
+                    } catch (Exception ignored) {}
+                }
+                String unit = cellAt(row, head, "单位", fmt);
+                String[] line = { pCode, pName, unit, qty.toPlainString(), price.toPlainString(), qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP).toPlainString() };
+                groups.computeIfAbsent(party, k -> new ArrayList<>()).add(line);
+                groupAmount.merge(party, qty.multiply(price), java.math.BigDecimal::add);
+            }
+            if (groups.isEmpty()) return Result.error("未解析到有效数据行" + (errors.isEmpty() ? "" : "（" + errors.get(0) + "）"));
+            // 逐组建单
+            List<String> orderNos = new ArrayList<>();
+            int n = 0;
+            for (Map.Entry<String, List<String[]>> e : groups.entrySet()) {
+                n++;
+                String partyName = e.getKey();
+                String partyCode = "";
+                try {
+                    List<Map<String,Object>> ps = db.queryForList(isSales
+                        ? "SELECT customer_code FROM cust_customer_main WHERE customer_name=?"
+                        : "SELECT supplier_code FROM supp_supplier_main WHERE supplier_name=?", partyName);
+                    if (!ps.isEmpty() && ps.get(0).values().iterator().next() != null) partyCode = String.valueOf(ps.get(0).values().iterator().next());
+                } catch (Exception ignored) {}
+                java.math.BigDecimal total = groupAmount.getOrDefault(partyName, java.math.BigDecimal.ZERO).setScale(2, java.math.RoundingMode.HALF_UP);
+                String orderNo = (isSales ? "SO-IMP-" : "PO-IMP-") + System.currentTimeMillis() + "-" + n;
+                if (isSales) {
+                    db.update("INSERT INTO trade_sales_main(sales_no,customer_code,customer_name,sales_date,total_amount,sales_person,sales_status,shipping_status,warehouse,remark) VALUES(?,?,?,CURDATE(),?,'导入','已审核','未发货','成品仓','Excel批量导入')",
+                        orderNo, partyCode, partyName, total);
+                } else {
+                    db.update("INSERT INTO trade_purchase_main(purchase_no,supplier_code,supplier_name,purchase_date,total_amount,buyer,purchase_status,warehouse,remark) VALUES(?,?,?,CURDATE(),?,'导入','待审批','原料仓','Excel批量导入')",
+                        orderNo, partyCode, partyName, total);
+                }
+                int lineNo = 0;
+                for (String[] l : e.getValue()) {
+                    lineNo++;
+                    if (isSales) {
+                        db.update("INSERT INTO trade_sales_detail(sales_no,line_no,product_code,product_name,qty,unit,unit_price,amount) VALUES(?,?,?,?,?,?,?,?)",
+                            orderNo, lineNo, l[0], l[1], new java.math.BigDecimal(l[3]), l[2], new java.math.BigDecimal(l[4]), new java.math.BigDecimal(l[5]));
+                    } else {
+                        db.update("INSERT INTO trade_purchase_detail(purchase_no,line_no,product_code,product_name,qty,unit,unit_price,amount) VALUES(?,?,?,?,?,?,?,?)",
+                            orderNo, lineNo, l[0], l[1], new java.math.BigDecimal(l[3]), l[2], new java.math.BigDecimal(l[4]), new java.math.BigDecimal(l[5]));
+                    }
+                }
+                // 业财联动：凭证 + 应收/应付
+                try {
+                    Long id = db.queryForObject(isSales ? "SELECT id FROM trade_sales_main WHERE sales_no=?" : "SELECT id FROM trade_purchase_main WHERE purchase_no=?", Long.class, orderNo);
+                    if (id != null) {
+                        if (isSales) finance.generateVoucherFromSale(id); else finance.generateVoucherFromPurchase(id);
+                    }
+                } catch (Exception ignored) {}
+                orderNos.add(orderNo);
+            }
+            audit.log(user(req), isSales ? "销售" : "采购", "Excel批量导入订单", n + "张:" + String.join(",", orderNos), audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("order_count", orderNos.size());
+            ret.put("line_count", groups.values().stream().mapToInt(List::size).sum());
+            ret.put("order_nos", orderNos);
+            ret.put("errors", errors);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("导入失败: " + e.getMessage()); }
+    }
+
     // ── 销售目标达成率 ──
     @GetMapping("/target-progress") public Result targetProgress() {
         try {

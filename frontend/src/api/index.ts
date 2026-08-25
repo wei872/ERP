@@ -87,6 +87,17 @@ export const bizApi = {
   quoteToSale: (quoteNo: string) => request<any>(`/biz/quote-to-sale/${encodeURIComponent(quoteNo)}`, { method: 'POST' }),
   salesReturn: (body: { ref_sales_no: string; product_code?: string; qty?: number; reason?: string }) => request<any>('/biz/sales-return', { method: 'POST', body: JSON.stringify(body) }),
   replenishToPurchase: () => request<{ po_count: number; po_nos: string[] }>('/biz/replenish-to-purchase', { method: 'POST' }),
+  salesTracking: () => request<any[]>('/biz/sales-tracking'),
+  systemMonitor: () => request<any>('/biz/system-monitor'),
+  importOrders: async (type: 'sales' | 'purchase', file: File) => {
+    const token = localStorage.getItem('erp_token');
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/biz/import-orders/${type}`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message || '导入失败');
+    return json;
+  },
   importExcel: async (type: string, file: File) => {
     const token = localStorage.getItem('erp_token');
     const fd = new FormData();
