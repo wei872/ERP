@@ -27,6 +27,13 @@ export default function DailyReportPage() {
   const [data, setData] = useState<any>(null);
   const [targetData, setTargetData] = useState<any>(null);
   const [error, setError] = useState('');
+  // 移动端适配：小屏压缩图表高度，随窗口尺寸实时切换（v5.25）
+  const [chartH, setChartH] = useState<number>(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 170 : 220));
+  useEffect(() => {
+    const onResize = () => setChartH(window.innerWidth < 640 ? 170 : 220);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     bizApi.dailyReport().then(r => setData(r.data)).catch(e => setError(e.message || '加载失败'));
@@ -42,16 +49,16 @@ export default function DailyReportPage() {
   const todayStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
 
   return (
-    <div className="erp-fade-in p-6 space-y-6 max-w-[1400px] mx-auto">
-      {/* 抬头 */}
-      <div className="rounded-2xl p-6 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f172a, #1e1b4b 60%, #312e81)' }}>
+    <div className="erp-fade-in p-3 md:p-6 space-y-4 md:space-y-6 max-w-[1400px] mx-auto">
+      {/* 抬头（移动端：竖排 + 全宽按钮） */}
+      <div className="rounded-2xl p-4 md:p-6 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #0f172a, #1e1b4b 60%, #312e81)' }}>
         <div className="absolute -top-10 -right-10 w-48 h-48 rounded-full bg-indigo-500/20 blur-2xl"></div>
-        <div className="relative flex items-center justify-between">
+        <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-xl font-bold tracking-tight flex items-center gap-2">📰 经营日报</h2>
-            <p className="text-xs text-indigo-200 mt-1.5">{todayStr} · 业务发生实时汇总</p>
+            <h2 className="text-lg md:text-xl font-bold tracking-tight flex items-center gap-2">📰 经营日报</h2>
+            <p className="text-[11px] md:text-xs text-indigo-200 mt-1.5">{todayStr} · 业务发生实时汇总</p>
           </div>
-          <button onClick={() => window.print()} className="no-print px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-sm hover:bg-white/20 transition-colors">🖨️ 打印日报</button>
+          <button onClick={() => window.print()} className="no-print px-4 py-2 rounded-xl bg-white/10 border border-white/20 text-sm hover:bg-white/20 transition-colors sm:shrink-0">🖨️ 打印日报</button>
         </div>
       </div>
 
@@ -90,7 +97,7 @@ export default function DailyReportPage() {
               {/* 目标-实际对比图 */}
               {(targetData.rows || []).some((r: any) => Number(r.target) > 0) && (
                 <div className="pt-1">
-                  <ResponsiveContainer width="100%" height={220}>
+                  <ResponsiveContainer width="100%" height={chartH}>
                     <BarChart data={(targetData.rows || []).filter((r: any) => Number(r.target) > 0).map((r: any) => ({ name: r.salesperson, 目标: Number(r.target) || 0, 实际: Number(r.actual) || 0 }))} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                       <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -103,7 +110,7 @@ export default function DailyReportPage() {
                   </ResponsiveContainer>
                 </div>
               )}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4 pt-2">
                 {(targetData.rows || []).map((r: any) => {
                   const rate = Number(r.rate) || 0;
                   const hasTarget = Number(r.target) > 0;
@@ -206,9 +213,9 @@ export default function DailyReportPage() {
           {(data.recentSales || []).length === 0 ? <p className="text-xs text-slate-400 text-center py-6">暂无销售单</p> : (
             <div className="space-y-2">
               {(data.recentSales || []).map((s: any) => (
-                <div key={s.id} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0">
+                <div key={s.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-xs py-1.5 border-b border-slate-50 last:border-0">
                   <span className="font-mono text-indigo-600">{s.sales_no}</span>
-                  <span className="text-slate-600 truncate max-w-[30%]">{s.customer_name}</span>
+                  <span className="text-slate-600 truncate max-w-[42%] md:max-w-[30%]">{s.customer_name}</span>
                   <span className="tabular-nums font-medium text-slate-700">¥{Number(s.total_amount || 0).toLocaleString()}</span>
                   <span className="text-slate-400">{s.sales_status}</span>
                 </div>
@@ -221,10 +228,10 @@ export default function DailyReportPage() {
           {(data.recentApprovals || []).length === 0 ? <p className="text-xs text-slate-400 text-center py-6">暂无审批</p> : (
             <div className="space-y-2">
               {(data.recentApprovals || []).map((s: any) => (
-                <div key={s.id} className="flex items-center justify-between text-xs py-1.5 border-b border-slate-50 last:border-0">
+                <div key={s.id} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-xs py-1.5 border-b border-slate-50 last:border-0">
                   <span className="font-mono text-indigo-600">{s.approval_no}</span>
                   <span className="text-slate-600">{s.approval_type}</span>
-                  <span className="text-slate-500">{s.applicant}</span>
+                  <span className="text-slate-500 hidden sm:inline">{s.applicant}</span>
                   <span className="tabular-nums text-slate-700">¥{Number(s.amount || 0).toLocaleString()}</span>
                   <span className={`px-1.5 py-0.5 rounded ${s.approval_status === '已通过' ? 'bg-emerald-50 text-emerald-600' : s.approval_status === '已驳回' ? 'bg-red-50 text-red-500' : 'bg-amber-50 text-amber-600'}`}>{s.approval_status}</span>
                 </div>

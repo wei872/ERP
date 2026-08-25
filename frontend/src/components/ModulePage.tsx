@@ -46,6 +46,53 @@ function formatCellDate(v: unknown): string {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
+/** 客户信用预检（v5.25）：销售订单表单内实时展示客户信用占用，超额度红色拦截提示；管理员可勾选强制放行（后端留审计痕） */
+function SalesCreditHint({ formData, setFormData, forceAllowed }: { formData: Record<string, unknown>; setFormData: (fn: (p: Record<string, unknown>) => Record<string, unknown>) => void; forceAllowed: boolean }) {
+  const [info, setInfo] = useState<any>(null);
+  const code = String(formData.customer_code || '').trim();
+  const amount = Number(formData.total_amount) || 0;
+  useEffect(() => {
+    setInfo(null);
+    if (!code) return;
+    const tm = setTimeout(() => { bizApi.creditUsage(code).then(r => setInfo(r.data)).catch(() => {}); }, 350);
+    return () => clearTimeout(tm);
+  }, [code]);
+  if (!code) return null;
+  if (!info) return <div className="ml-[152px] text-[11px] text-slate-400 flex items-center gap-2"><span className="erp-spinner"></span>正在查询客户信用占用…</div>;
+  if (!info.exists) return <div className="ml-[152px] text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">⚠️ 客户 {code} 不在客户主数据中，保存前请先维护客户档案</div>;
+  if (!info.enabled) return <div className="ml-[152px] text-[11px] text-slate-400">💳 {info.customer_name}：未启用信用额度（额度为 0，不拦截）</div>;
+  const used = Number(info.used) || 0, limit = Number(info.credit_limit) || 0;
+  const projected = used + amount;
+  const over = projected > limit;
+  const pct = limit > 0 ? Math.min(100, (projected / limit) * 100) : 0;
+  const forced = formData.ignore_credit === 'true' || formData.ignore_credit === true;
+  const money = (v: number) => '¥' + v.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  return (
+    <div className={`ml-[152px] rounded-xl border p-3 text-[11px] space-y-2 erp-fade-in ${over ? 'bg-red-50 border-red-200' : 'bg-slate-50 border-slate-200'}`}>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <span className="font-semibold text-slate-700">💳 信用预检 · {info.customer_name}</span>
+        <span className="text-slate-500">额度 <b className="tabular-nums text-slate-700">{money(limit)}</b></span>
+        <span className="text-slate-500">已占用 <b className="tabular-nums text-slate-700">{money(used)}</b>（{Number(info.open_receivable_count || 0)} 笔未收应收）</span>
+        <span className="text-slate-500">在途订单 <b className="tabular-nums text-slate-700">{money(Number(info.open_order_amount || 0))}</b></span>
+      </div>
+      <div className="h-2 bg-slate-200/70 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${over ? 'bg-red-400' : pct >= 90 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${pct}%` }}></div>
+      </div>
+      {over ? (
+        <p className="text-red-600 font-medium">⛔ 本单保存后将超出信用额度 {money(projected - limit)}（提交会被后端拦截）。请先催收核销回款、调高客户信用额度{forceAllowed ? '，或勾选下方强制放行' : ''}。</p>
+      ) : (
+        <p className="text-emerald-600">✅ 本单金额 {money(amount)} 计入后占用 {pct.toFixed(1)}%，剩余额度 {money(limit - projected)}，可正常下单。</p>
+      )}
+      {over && forceAllowed && (
+        <label className="flex items-center gap-2 text-red-600 font-medium cursor-pointer select-none">
+          <input type="checkbox" checked={forced} onChange={e => setFormData(p => ({ ...p, ignore_credit: e.target.checked ? 'true' : 'false' }))} className="accent-red-500"/>
+          管理员强制放行（跳过信用拦截，操作将写入审计日志）
+        </label>
+      )}
+    </div>
+  );
+}
+
 export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey: string; initialSearch?: string }) {
   const { currentUser } = useAuth();
   const [search, setSearch] = useState('');
@@ -499,7 +546,7 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
           </div>
           <div className="p-6 overflow-y-auto flex-1">
             {modalMode === 'delete' ? <div className="text-center py-4"><div className="text-4xl mb-3">⚠️</div><p className="text-slate-600 text-sm mb-4">确定要删除这条记录吗？此操作不可撤销（关联明细将按外键级联删除）。</p><div className="bg-slate-50 rounded-xl p-4 text-left max-w-md mx-auto border border-slate-100">{table.cols.slice(0, 4).map(c => <div key={c.name} className="flex justify-between py-1.5 text-xs"><span className="text-slate-500">{c.cnName}</span><span className="text-slate-800 font-medium">{String(formData[c.name] ?? '-')}</span></div>)}</div></div>
-            : <div className="space-y-3">{table.cols.map(c => { const k = c.name, l = c.cnName, t = c.type; const dict = dicts[k]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}{modalMode !== 'view' && !c.nullable && k !== 'id' && k !== 'created_at' && <span className="text-red-500 ml-0.5" title="必填字段">*</span>}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预览" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : dict ? <select value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"><option value="">-- 请选择{l} --</option>{dict.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}</select> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : (tableKey === 'trade_goods_main' && k === 'product_code' && modalMode === 'add') ? <div className="flex gap-2 items-center"><input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input flex-1" placeholder="点右侧 ⚡ 按行业编码规则自动生成"/><select value={codeRule} onChange={e => setCodeRule(e.target.value)} className="erp-input w-40">{codeRules.map(r => <option key={r.rule_code} value={r.rule_code}>{r.prefix}* {r.rule_name}</option>)}</select><button type="button" onClick={genGoodsCode} className="erp-btn erp-btn-primary whitespace-nowrap">⚡ 生成编码</button></div> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}</div>}
+            : <div className="space-y-3">{table.cols.map(c => { const k = c.name, l = c.cnName, t = c.type; const dict = dicts[k]; return <div key={k} className="grid grid-cols-[140px_1fr] items-start gap-3"><label className="text-xs font-semibold text-slate-500 pt-2.5 text-right">{l}{modalMode !== 'view' && !c.nullable && k !== 'id' && k !== 'created_at' && <span className="text-red-500 ml-0.5" title="必填字段">*</span>}</label>{modalMode === 'view' ? <div className="px-4 py-2.5 bg-slate-50 rounded-lg text-sm border border-slate-100">{String(formData[k] ?? '').startsWith('data:image/') ? (formData[k] ? <div className="space-y-2"><img src={String(formData[k])} alt={l} className="max-h-48 rounded-xl border shadow-sm object-contain bg-white cursor-pointer" onClick={() => setPreviewImg(String(formData[k]))} /><button onClick={() => setPreviewImg(String(formData[k]))} className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-medium">🔍 点击放大查看高清大图</button></div> : <span className="text-slate-400 text-xs italic">无图片</span>) : t === 'number' && typeof formData[k] === 'number' ? <span className="font-mono font-semibold tabular-nums">{((formData[k] as number) || 0).toLocaleString()}</span> : <span className="text-slate-700">{String(formData[k] ?? '-')}</span>}</div> : k.includes('image') ? <div className="space-y-2"><input type="file" accept="image/*" onChange={e => handleFileUpload(k, e.target.files?.[0] || null)} className="block w-full text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer" />{formData[k] ? <div className="relative inline-block border rounded-xl overflow-hidden shadow-sm bg-slate-50 p-1"><img src={String(formData[k])} alt="预览" className="h-24 object-contain rounded-lg"/><button type="button" onClick={() => setFormData(p => ({ ...p, [k]: '' }))} className="absolute top-2 right-2 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] hover:bg-red-600 shadow-md">✕</button></div> : null}<input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} placeholder="或粘贴发票图片 Base64 / URL" className="erp-input text-xs font-mono"/></div> : dict ? <select value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"><option value="">-- 请选择{l} --</option>{dict.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}</select> : t === 'number' ? <input type="number" value={Number(formData[k]) || 0} onChange={e => setFormData(p => ({ ...p, [k]: Number(e.target.value) || 0 }))} className="erp-input font-mono tabular-nums"/> : t === 'date' ? <input type="date" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/> : (tableKey === 'trade_goods_main' && k === 'product_code' && modalMode === 'add') ? <div className="flex gap-2 items-center"><input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input flex-1" placeholder="点右侧 ⚡ 按行业编码规则自动生成"/><select value={codeRule} onChange={e => setCodeRule(e.target.value)} className="erp-input w-40">{codeRules.map(r => <option key={r.rule_code} value={r.rule_code}>{r.prefix}* {r.rule_name}</option>)}</select><button type="button" onClick={genGoodsCode} className="erp-btn erp-btn-primary whitespace-nowrap">⚡ 生成编码</button></div> : <input type="text" value={String(formData[k] || '')} onChange={e => setFormData(p => ({ ...p, [k]: e.target.value }))} className="erp-input"/>}</div>; })}{tableKey === 'trade_sales_main' && (modalMode === 'add' || modalMode === 'edit') && <SalesCreditHint formData={formData} setFormData={setFormData} forceAllowed={currentUser?.role === 'admin'}/>}</div>}
           </div>
           <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2 bg-slate-50/50">
             <button onClick={closeModal} className="erp-btn erp-btn-ghost">取消</button>

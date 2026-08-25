@@ -95,6 +95,47 @@ export default function InventoryClosingPage() {
   }, []);
   useEffect(() => { if (tab === 'count') loadCountRecords(); }, [tab, loadCountRecords]);
 
+  // ── 整仓批量盘点（v5.25）：拉账面 → 录实盘 → 差异自动调账 + 盘盈亏凭证 ──
+  const [bcOpen, setBcOpen] = useState(false);
+  const [bcWh, setBcWh] = useState('默认仓');
+  const [bcItems, setBcItems] = useState<any[]>([]);
+  const [bcLoading, setBcLoading] = useState(false);
+  const [bcMakeVoucher, setBcMakeVoucher] = useState(true);
+  const [bcDiffOnly, setBcDiffOnly] = useState(false);
+  const openBatchCount = () => {
+    const wh = whFilter || warehouses[0] || '默认仓';
+    setBcWh(wh); setBcOpen(true); setBcDiffOnly(false);
+    loadBookList(wh);
+  };
+  const loadBookList = async (wh: string) => {
+    setBcLoading(true); setBcItems([]);
+    try {
+      const r = await bizApi.stockCheckBookList(wh);
+      setBcItems((r.data || []).map((x: any) => ({ ...x, actual_qty: Number(x.qty), reason: '' })));
+    } catch (e: any) { toastNotify('账面库存加载失败：' + (e.message || '')); }
+    setBcLoading(false);
+  };
+  const bcSetActual = (code: string, v: string) => {
+    setBcItems(prev => prev.map(x => x.product_code === code ? { ...x, actual_qty: v === '' ? '' : Number(v) } : x));
+  };
+  const bcDiffRows = bcItems.filter(x => Number(x.actual_qty || 0) !== Number(x.qty || 0));
+  const bcGain = bcDiffRows.filter(x => Number(x.actual_qty || 0) > Number(x.qty)).reduce((s, x) => s + (Number(x.actual_qty) - Number(x.qty)) * Number(x.unit_cost || 0), 0);
+  const bcLoss = bcDiffRows.filter(x => Number(x.actual_qty || 0) < Number(x.qty)).reduce((s, x) => s + (Number(x.qty) - Number(x.actual_qty || 0)) * Number(x.unit_cost || 0), 0);
+  const confirmBatchCount = async () => {
+    if (bcDiffRows.length === 0) { toastNotify('所有品项账实一致，无需调账', 'warn'); return; }
+    if (bcDiffRows.some(x => x.actual_qty === '' || Number(x.actual_qty) < 0)) { toastNotify('实盘数量不能为空或负数', 'warn'); return; }
+    setSaving(true);
+    try {
+      const r = await bizApi.stockCheckBatch({ warehouse: bcWh, items: bcDiffRows.map(x => ({ product_code: x.product_code, actual_qty: Number(x.actual_qty), reason: x.reason || '批量盘点' })), make_voucher: bcMakeVoucher });
+      const d = r.data || {};
+      toastNotify(`批量盘点完成 ${d.check_no}：差异 ${d.diff_items} 项，盘盈 ¥${Number(d.gain_amount || 0).toLocaleString()} / 盘亏 ¥${Number(d.loss_amount || 0).toLocaleString()}${d.voucher_no ? `，盘盈亏凭证 ${d.voucher_no}（待审核）` : ''}`);
+      setBcOpen(false);
+      loadCountRecords();
+      loadPanoramicData();
+    } catch (e: any) { toastNotify('批量盘点失败：' + (e.message || '')); }
+    setSaving(false);
+  };
+
   useEffect(() => {
     // 仓库列表：优先仓库主数据表，兜底默认仓（未执行 upgrade3 的环境）
     dataApi.list('trade_warehouse_main', 1, 50, '')
@@ -552,6 +593,11 @@ export default function InventoryClosingPage() {
 
       {tab === 'count' && (
         <div className="space-y-6">
+          {/* 工具条：单笔盘点 + 整仓批量盘点 */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-slate-500">盘点方式：<b className="text-slate-700">单笔盘点</b>（下方表单，按商品逐个核对）或 <b className="text-slate-700">整仓批量盘点</b>（一次录入全仓实盘，差异自动调账并可生成盘盈亏凭证）。</p>
+            <button onClick={openBatchCount} className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-sm font-semibold shadow-md hover:opacity-90 transition-opacity">📦 整仓批量盘点</button>
+          </div>
           {/* 盘点表单：查账面 → 录实盘 → 自动调账 */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200/80 max-w-2xl">
             <h3 className="font-bold text-slate-800 text-base mb-1 flex items-center gap-2"><span>📋</span><span>库存盘点（账实核对，差异自动调账）</span></h3>
@@ -621,6 +667,62 @@ export default function InventoryClosingPage() {
                 </table>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* 整仓批量盘点工作台（v5.25） */}
+      {bcOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 erp-modal-bg" onClick={() => setBcOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col erp-modal-panel" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-emerald-50 to-teal-50 shrink-0">
+              <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">📦 整仓批量盘点 <span className="text-[11px] font-normal text-slate-500">账面 → 实盘 → 差异自动调账</span></h3>
+              <div className="flex items-center gap-2">
+                <select value={bcWh} onChange={e => { setBcWh(e.target.value); loadBookList(e.target.value); }} className="erp-input text-sm py-1.5">
+                  {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+                </select>
+                <button onClick={() => loadBookList(bcWh)} className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">🔄 重载账面</button>
+                <button onClick={() => setBcOpen(false)} className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg></button>
+              </div>
+            </div>
+            {/* 汇总条 */}
+            <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs bg-slate-50/60">
+              <span className="text-slate-500">盘点品项 <b className="text-slate-800 tabular-nums">{bcItems.length}</b></span>
+              <span className="text-slate-500">差异项 <b className={`tabular-nums ${bcDiffRows.length ? 'text-amber-600' : 'text-slate-800'}`}>{bcDiffRows.length}</b></span>
+              <span className="text-slate-500">预计盘盈 <b className="tabular-nums text-emerald-600">+¥{bcGain.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></span>
+              <span className="text-slate-500">预计盘亏 <b className="tabular-nums text-red-500">-¥{bcLoss.toLocaleString(undefined, { maximumFractionDigits: 2 })}</b></span>
+              <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer ml-auto"><input type="checkbox" checked={bcDiffOnly} onChange={e => setBcDiffOnly(e.target.checked)} className="accent-indigo-600"/>只看差异项</label>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              {bcLoading ? <div className="text-center py-12"><div className="erp-spinner mx-auto mb-3"></div><p className="text-sm text-slate-400">账面库存加载中…</p></div>
+                : bcItems.length === 0 ? <p className="text-center text-sm text-slate-400 py-12">该仓库暂无库存记录</p> : (
+                <table className="erp-table text-xs w-full">
+                  <thead><tr><th className="text-left">商品</th><th>账面数量</th><th>单位成本</th><th>实盘数量</th><th>差异</th><th className="text-left">差异说明</th></tr></thead>
+                  <tbody>
+                    {(bcDiffOnly ? bcDiffRows : bcItems).map(x => {
+                      const diff = Number(x.actual_qty || 0) - Number(x.qty || 0);
+                      return (
+                        <tr key={x.product_code} className={diff !== 0 ? 'bg-amber-50/50' : ''}>
+                          <td className="text-left"><p className="font-medium text-slate-700 whitespace-nowrap">{x.product_name}</p><p className="font-mono text-[10px] text-slate-400">{x.product_code}</p></td>
+                          <td className="tabular-nums">{Number(x.qty || 0)}</td>
+                          <td className="tabular-nums text-slate-500">¥{Number(x.unit_cost || 0).toFixed(2)}</td>
+                          <td><input type="number" min={0} value={x.actual_qty} onChange={e => bcSetActual(x.product_code, e.target.value)} className="erp-input w-24 py-1 text-center font-mono tabular-nums"/></td>
+                          <td className={`tabular-nums font-bold ${diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-red-500' : 'text-slate-300'}`}>{diff > 0 ? '+' : ''}{diff}</td>
+                          <td className="text-left">{diff !== 0 ? <input value={x.reason} onChange={e => setBcItems(prev => prev.map(p => p.product_code === x.product_code ? { ...p, reason: e.target.value } : p))} placeholder="如：破损/漏记" className="erp-input w-36 py-1"/> : <span className="text-slate-300">—</span>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+              <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer"><input type="checkbox" checked={bcMakeVoucher} onChange={e => setBcMakeVoucher(e.target.checked)} className="accent-indigo-600"/>生成盘盈亏凭证（借1405库存商品 / 贷1901待处理财产损溢，进待审核）</label>
+              <div className="flex gap-2">
+                <button onClick={() => setBcOpen(false)} className="erp-btn erp-btn-ghost">取消</button>
+                <button onClick={confirmBatchCount} disabled={saving || bcLoading} className="px-5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl text-sm font-semibold shadow-md disabled:opacity-50">{saving ? '调账中...' : `确认盘点并调账（${bcDiffRows.length} 项差异）`}</button>
+              </div>
+            </div>
           </div>
         </div>
       )}

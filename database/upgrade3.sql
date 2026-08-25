@@ -337,7 +337,8 @@ CREATE TABLE IF NOT EXISTS sys_no_rule (
 INSERT IGNORE INTO sys_no_rule(rule_key, rule_name, prefix, seq_length, remark) VALUES
 ('voucher', '手工凭证号', 'VZ-', 4, '格式：前缀+年月+流水，按月复位'),
 ('sales', '销售订单号', 'SO-', 4, '格式：前缀+年月+流水，按月复位'),
-('purchase', '采购订单号', 'PO-', 4, '格式：前缀+年月+流水，按月复位');
+('purchase', '采购订单号', 'PO-', 4, '格式：前缀+年月+流水，按月复位'),
+('stockcheck', '盘点单号', 'PD-', 4, '格式：前缀+年月+流水，按月复位');
 
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('sys_no_rule','单据编号规则','系统维护','编号规则',920);

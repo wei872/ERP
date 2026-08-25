@@ -27,7 +27,7 @@ public class DataController {
 
     @Autowired private JdbcTemplate db; @Autowired private DataSource ds;
     @Autowired private AuditService audit; @Autowired private FinanceService finance; @Autowired private InventoryService inventory;
-    @Autowired private MetaService meta; @Autowired private SummaryService summaryService;
+    @Autowired private MetaService meta; @Autowired private SummaryService summaryService; @Autowired private CreditService credit;
 
     private static final Pattern VALID = Pattern.compile("^[a-z][a-z0-9_]{2,60}$");
     private static final Map<String, Set<String>> TABLE_ROLE_MAP = new LinkedHashMap<>();
@@ -198,25 +198,17 @@ public class DataController {
         try {
             String t=safe(table);
             if(body.isEmpty())return Result.error("数据为空");
-            // 客户信用额度控制：新增销售单前置校验（信用额度>0 时生效）
+            // 客户信用额度控制（v5.25 信用中枢）：新增销售单前置校验（额度>0 时生效，管理员可强制放行并留痕）
             if (t.equals("trade_sales_main")) {
                 String custCode = str(body.get("customer_code"));
                 java.math.BigDecimal orderAmt = BigDecimal.ZERO;
                 try { if (body.get("total_amount") != null) orderAmt = new java.math.BigDecimal(String.valueOf(body.get("total_amount")).trim()); } catch (Exception ignored) {}
-                if (!custCode.isEmpty() && orderAmt.signum() > 0) {
-                    List<Map<String,Object>> cs = db.queryForList("SELECT customer_name, credit_limit FROM cust_customer_main WHERE customer_code=?", custCode);
-                    if (!cs.isEmpty() && cs.get(0).get("credit_limit") != null) {
-                        java.math.BigDecimal limit = new java.math.BigDecimal(cs.get(0).get("credit_limit").toString());
-                        if (limit.signum() > 0) {
-                            java.math.BigDecimal used = db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main WHERE customer_code=?", java.math.BigDecimal.class, custCode);
-                            if (used == null) used = java.math.BigDecimal.ZERO;
-                            if (used.add(orderAmt).compareTo(limit) > 0) {
-                                return Result.error("超出客户信用额度：" + cs.get(0).get("customer_name")
-                                    + "（额度 ¥" + limit + "，应收未收 ¥" + used + "，本单 ¥" + orderAmt
-                                    + "，将超出 ¥" + used.add(orderAmt).subtract(limit) + "）—— 请先催收核销回款或调整信用额度");
-                            }
-                        }
-                    }
+                boolean forceCredit = "admin".equals(role) && "true".equalsIgnoreCase(String.valueOf(body.getOrDefault("ignore_credit", "false")));
+                String creditErr = credit.check(custCode, orderAmt);
+                if (creditErr != null && forceCredit) {
+                    audit.log(String.valueOf(req.getAttribute("user")), t, "信用拦截强制放行", custCode + " " + creditErr, audit.getIp(req));
+                } else if (creditErr != null) {
+                    return Result.error(creditErr);
                 }
             }
             meta.validateDictValues(t, body);

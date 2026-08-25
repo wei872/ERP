@@ -41,6 +41,7 @@ public class BizController {
     @Autowired private InventoryService inventory;
     @Autowired private ReportService report;
     @Autowired private ProductionService production;
+    @Autowired private CreditService credit;
     @Autowired private JdbcTemplate db;
 
     // ── 数据驾驶舱 / 报表中心 ──
@@ -605,6 +606,9 @@ public class BizController {
             java.math.BigDecimal amount = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
             String customerCode = String.valueOf(q.getOrDefault("customer_code", ""));
             String customerName = String.valueOf(q.getOrDefault("customer_name", ""));
+            // 信用前置拦截（v5.25 信用中枢）：报价转订单与新建销售单同一口径
+            String creditErr = credit.check(customerCode, amount);
+            if (creditErr != null) return Result.error("转单被信用管控拦截：" + creditErr);
             db.update("INSERT INTO trade_sales_main(sales_no,customer_code,customer_name,sales_date,total_amount,sales_person,sales_status,shipping_status,warehouse,remark) VALUES(?,?,?,?,?,?,'已审核','未发货','成品仓',?)",
                 salesNo, customerCode, customerName, new java.sql.Date(System.currentTimeMillis()), amount,
                 q.getOrDefault("quote_person", user(req)), "报价单转换:" + quoteNo);
@@ -748,6 +752,109 @@ public class BizController {
             ret.put("diff_amount", diff.multiply(unitCost));
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("盘点确认失败: " + e.getMessage()); }
+    }
+
+    /** 整仓账面库存清单（批量盘点的底表） */
+    @GetMapping("/stock-check/book-list") public Result stockCheckBookList(@RequestParam String warehouse) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList(
+                "SELECT product_code, product_name, spec_model, qty, unit_cost, total_value, min_stock " +
+                "FROM trade_inventory_balance WHERE warehouse=? ORDER BY product_code LIMIT 500", warehouse);
+            return Result.ok(rows);
+        } catch (Exception e) { return Result.error("账面库存加载失败: " + e.getMessage()); }
+    }
+
+    /**
+     * 批量盘点差异自动调账（v5.25）：
+     * 1) 按仓库拉账面 → 前端录实盘 → 提交差异项；
+     * 2) 盘盈自动入库 / 盘亏自动出库（库存真源联动，硬失败回滚）；
+     * 3) 整单共用一个盘点单号 PD-xxxx；
+     * 4) 可选生成「盘盈亏」会计凭证：盘盈 借1405库存商品/贷1901待处理财产损溢，盘亏反向；凭证进待审核留痕。
+     */
+    @PostMapping("/stock-check/batch-confirm")
+    @Transactional
+    @SuppressWarnings("unchecked")
+    public Result stockCheckBatch(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"warehouse".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String wh = String.valueOf(body.getOrDefault("warehouse", "默认仓"));
+            List<Map<String,Object>> items = (List<Map<String,Object>>) body.get("items");
+            boolean makeVoucher = !"false".equalsIgnoreCase(String.valueOf(body.getOrDefault("make_voucher", "true")));
+            if (items == null || items.isEmpty()) return Result.error("盘点明细为空");
+            if (items.size() > 500) return Result.error("单次批量盘点不能超过 500 项");
+            // 前置全量校验（先校验后落库：避免中途报错导致部分调账无法回滚）
+            for (Map<String,Object> it : items) {
+                String c = String.valueOf(it.getOrDefault("product_code", "")).trim();
+                if (c.isEmpty()) continue;
+                try {
+                    java.math.BigDecimal a = new java.math.BigDecimal(String.valueOf(it.getOrDefault("actual_qty", "0")));
+                    if (a.signum() < 0) return Result.error("实盘数量不能为负：" + c);
+                } catch (NumberFormatException e) { return Result.error("实盘数量格式无效：" + c); }
+            }
+            String checkNo;
+            try { checkNo = noRule.nextNo("stockcheck"); } catch (Exception e) { checkNo = "PD-" + System.currentTimeMillis(); }
+            int diffItems = 0;
+            java.math.BigDecimal gainAmt = java.math.BigDecimal.ZERO, lossAmt = java.math.BigDecimal.ZERO;
+            for (Map<String,Object> it : items) {
+                String code = String.valueOf(it.getOrDefault("product_code", "")).trim();
+                if (code.isEmpty()) continue;
+                java.math.BigDecimal actual = new java.math.BigDecimal(String.valueOf(it.getOrDefault("actual_qty", "0")));
+                List<Map<String,Object>> rows = db.queryForList("SELECT qty, unit_cost, product_name FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", code, wh);
+                java.math.BigDecimal system = rows.isEmpty() ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(rows.get(0).get("qty").toString());
+                java.math.BigDecimal unitCost = (rows.isEmpty() || rows.get(0).get("unit_cost") == null) ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(rows.get(0).get("unit_cost").toString());
+                String pName = rows.isEmpty() ? String.valueOf(it.getOrDefault("product_name", code)) : String.valueOf(rows.get(0).get("product_name"));
+                java.math.BigDecimal diff = actual.subtract(system);
+                if (diff.signum() == 0) continue;
+                // 差异自动调账：盘盈入库 / 盘亏出库（与单笔盘点同一入口，保证批次与流水一致）
+                if (diff.signum() > 0) inventory.stockIn(code, pName, "", wh, "", diff, unitCost, checkNo);
+                else inventory.stockOut(code, wh, diff.abs(), checkNo);
+                java.math.BigDecimal amt = diff.abs().multiply(unitCost).setScale(2, java.math.RoundingMode.HALF_UP);
+                if (diff.signum() > 0) gainAmt = gainAmt.add(amt); else lossAmt = lossAmt.add(amt);
+                try {
+                    db.update("INSERT INTO trade_stock_check(check_no,warehouse,product_code,product_name,check_date,system_qty,actual_qty,diff_qty,diff_amount,checker,status,remark) VALUES(?,?,?,?,CURDATE(),?,?,?,?,?,'已盘点',?)",
+                        checkNo, wh, code, pName, system, actual, diff, diff.multiply(unitCost), user(req), String.valueOf(it.getOrDefault("reason", "批量盘点")));
+                } catch (Exception ignored) {} // 未执行 upgrade3 补列时不阻断调账
+                diffItems++;
+            }
+            if (diffItems == 0) return Result.error("所有品项账实一致，无需调账");
+            // 盘盈亏凭证：盘盈 借1405/贷1901，盘亏 借1901/贷1405（借贷各自平衡，进待审核）
+            String voucherNo = null;
+            if (makeVoucher && gainAmt.add(lossAmt).signum() > 0) {
+                List<Map<String,Object>> lines = new ArrayList<>();
+                if (gainAmt.signum() > 0) {
+                    lines.add(line("1405", "库存商品", gainAmt, java.math.BigDecimal.ZERO, "盘盈入库-" + checkNo));
+                    lines.add(line("1901", "待处理财产损溢", java.math.BigDecimal.ZERO, gainAmt, "盘盈入库-" + checkNo));
+                }
+                if (lossAmt.signum() > 0) {
+                    lines.add(line("1901", "待处理财产损溢", lossAmt, java.math.BigDecimal.ZERO, "盘亏出库-" + checkNo));
+                    lines.add(line("1405", "库存商品", java.math.BigDecimal.ZERO, lossAmt, "盘亏出库-" + checkNo));
+                }
+                Map<String,Object> vz = finance.createVoucher("记", null, lines, user(req), com.erp.config.CompanyContext.get());
+                voucherNo = String.valueOf(vz.get("voucher_no"));
+            }
+            audit.log(user(req), "库存", "批量盘点", checkNo + " " + wh + " 差异项=" + diffItems + " 盘盈¥" + gainAmt + " 盘亏¥" + lossAmt, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("check_no", checkNo);
+            ret.put("warehouse", wh);
+            ret.put("diff_items", diffItems);
+            ret.put("gain_amount", gainAmt);
+            ret.put("loss_amount", lossAmt);
+            ret.put("voucher_no", voucherNo);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("批量盘点失败: " + e.getMessage()); }
+    }
+
+    private Map<String,Object> line(String code, String name, java.math.BigDecimal debit, java.math.BigDecimal credit, String summary) {
+        Map<String,Object> l = new LinkedHashMap<>();
+        l.put("subject_code", code); l.put("subject_name", name);
+        l.put("debit_amount", debit); l.put("credit_amount", credit); l.put("summary", summary);
+        return l;
+    }
+
+    // ── 客户信用占用查询（下单前可视化校验，v5.25）──
+    @GetMapping("/credit-usage/{customerCode}") public Result creditUsage(@PathVariable String customerCode) {
+        try { return Result.ok(credit.usage(customerCode)); }
+        catch (Exception e) { return Result.error("信用占用查询失败: " + e.getMessage()); }
     }
 
     // ── 回收站恢复 ──
