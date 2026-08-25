@@ -1195,6 +1195,205 @@ public class BizController {
         return "'" + s + "'";
     }
 
+    // ── 生产工单执行跟踪：创建 → 领料 → 生产 → 完工 四段进度 ──
+    @GetMapping("/production-tracking") public Result productionTracking() {
+        try {
+            List<Map<String,Object>> orders = db.queryForList("SELECT * FROM prod_work_order ORDER BY id DESC LIMIT 25");
+            // 各工单领料进度（实领数量合计）
+            Map<String, java.math.BigDecimal> reqMap = new LinkedHashMap<>();
+            try {
+                for (Map<String,Object> r : db.queryForList(
+                        "SELECT ref_work_order, COALESCE(SUM(actual_req_qty),0) q FROM prod_material_requisition GROUP BY ref_work_order")) {
+                    reqMap.put(String.valueOf(r.get("ref_work_order")), new java.math.BigDecimal(r.get("q").toString()));
+                }
+            } catch (Exception ignored) {}
+            List<Map<String,Object>> rows = new ArrayList<>();
+            for (Map<String,Object> o : orders) {
+                String woNo = String.valueOf(o.get("work_order_no"));
+                java.math.BigDecimal plan = toBig(o.get("plan_qty"));
+                java.math.BigDecimal actual = toBig(o.get("actual_qty"));
+                java.math.BigDecimal scrap = toBig(o.get("scrap_qty"));
+                java.math.BigDecimal issued = reqMap.getOrDefault(woNo, java.math.BigDecimal.ZERO);
+                String status = String.valueOf(o.getOrDefault("order_status", ""));
+                int stage = 0; // 0 创建
+                if (issued.signum() > 0) stage = 1; // 已领料
+                if (actual.signum() > 0) stage = 2; // 生产中（有完工入库）
+                if ("已完成".equals(status) || (plan.signum() > 0 && actual.compareTo(plan) >= 0)) stage = 3; // 完工
+                Map<String,Object> row = new LinkedHashMap<>();
+                row.put("work_order_no", woNo);
+                row.put("product_name", o.get("product_name"));
+                row.put("product_code", o.get("product_code"));
+                row.put("plan_qty", plan);
+                row.put("actual_qty", actual);
+                row.put("scrap_qty", scrap);
+                row.put("issued_qty", issued);
+                row.put("start_date", o.get("start_date"));
+                row.put("order_status", status);
+                row.put("stage", stage);
+                row.put("progress", plan.signum() > 0
+                    ? actual.multiply(new java.math.BigDecimal("100")).divide(plan, 0, java.math.RoundingMode.HALF_UP).min(new java.math.BigDecimal("100"))
+                    : java.math.BigDecimal.ZERO);
+                rows.add(row);
+            }
+            return Result.ok(rows);
+        } catch (Exception e) { return Result.error("生产跟踪加载失败: " + e.getMessage()); }
+    }
+
+    private java.math.BigDecimal toBig(Object v) {
+        if (v == null) return java.math.BigDecimal.ZERO;
+        try { return new java.math.BigDecimal(v.toString()); } catch (Exception e) { return java.math.BigDecimal.ZERO; }
+    }
+
+    // ── 操作日志高级检索：用户/模块/时间范围 + 分页 ──
+    @GetMapping("/audit-search") public Result auditSearch(
+            @RequestParam(defaultValue = "") String user,
+            @RequestParam(defaultValue = "") String module,
+            @RequestParam(defaultValue = "") String from,
+            @RequestParam(defaultValue = "") String to,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size,
+            HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        try {
+            StringBuilder where = new StringBuilder(" WHERE 1=1");
+            List<Object> params = new ArrayList<>();
+            if (!user.trim().isEmpty()) { where.append(" AND username LIKE ?"); params.add("%" + user.trim() + "%"); }
+            if (!module.trim().isEmpty() && !"全部".equals(module.trim())) { where.append(" AND module=?"); params.add(module.trim()); }
+            if (from.matches("\\d{4}-\\d{2}-\\d{2}")) { where.append(" AND DATE(created_at) >= ?"); params.add(from); }
+            if (to.matches("\\d{4}-\\d{2}-\\d{2}")) { where.append(" AND DATE(created_at) <= ?"); params.add(to); }
+            Long total = db.queryForObject("SELECT COUNT(*) FROM sys_log_operation" + where, Long.class, params.toArray());
+            List<Object> pageParams = new ArrayList<>(params);
+            pageParams.add(Math.max(1, size));
+            pageParams.add((Math.max(1, page) - 1) * Math.max(1, size));
+            List<Map<String,Object>> rows = db.queryForList(
+                "SELECT * FROM sys_log_operation" + where + " ORDER BY id DESC LIMIT ? OFFSET ?", pageParams.toArray());
+            List<Map<String,Object>> modules = db.queryForList("SELECT DISTINCT module FROM sys_log_operation ORDER BY module");
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("total", total == null ? 0 : total);
+            ret.put("rows", rows);
+            ret.put("modules", modules);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("检索失败: " + e.getMessage()); }
+    }
+
+    // ── 三大财务报表 Excel 工作簿（一个文件三个 Sheet） ──
+    @GetMapping("/report/excel-all")
+    public ResponseEntity<byte[]> reportExcelAll(@RequestParam String period, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return ResponseEntity.status(403).build();
+        try (org.apache.poi.xssf.usermodel.XSSFWorkbook wb = new org.apache.poi.xssf.usermodel.XSSFWorkbook()) {
+            buildStatementSheet(wb.createSheet("资产负债表"), "balance", period);
+            buildStatementSheet(wb.createSheet("利润表"), "income", period);
+            buildStatementSheet(wb.createSheet("现金流量表"), "cashflow", period);
+            java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+            wb.write(bos);
+            String filename = java.net.URLEncoder.encode("财务报表_" + period + ".xlsx", "UTF-8").replace("+", "%20");
+            audit.log(user(req), "财务", "导出报表工作簿", period, audit.getIp(req));
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(bos.toByteArray());
+        } catch (Exception e) { return ResponseEntity.status(500).build(); }
+    }
+
+    /** 把指定报表填入 Sheet（标题行 + 汇总 + 明细） */
+    private void buildStatementSheet(org.apache.poi.ss.usermodel.Sheet sh, String type, String period) {
+        org.apache.poi.ss.usermodel.CellStyle head = sh.getWorkbook().createCellStyle();
+        org.apache.poi.ss.usermodel.Font hf = sh.getWorkbook().createFont();
+        hf.setBold(true);
+        head.setFont(hf);
+        int r = 0;
+        org.apache.poi.ss.usermodel.Row t = sh.createRow(r++);
+        t.createCell(0).setCellValue(("balance".equals(type) ? "资产负债表" : "income".equals(type) ? "利润表" : "现金流量表") + "　—　会计期间：" + period + "　—　" + com.erp.config.CompanyContext.get());
+        r++;
+        if ("balance".equals(type)) {
+            Map<String,Object> d = report.balanceSheet(period);
+            String[] heads = {"科目编码", "科目名称", "期末余额"};
+            org.apache.poi.ss.usermodel.Row hr = sh.createRow(r++);
+            for (int i = 0; i < heads.length; i++) { org.apache.poi.ss.usermodel.Cell c = hr.createCell(i); c.setCellValue(heads[i]); c.setCellStyle(head); }
+            for (Map<String,Object> it : asList(d.get("assetItems"))) {
+                org.apache.poi.ss.usermodel.Row row = sh.createRow(r++);
+                row.createCell(0).setCellValue(String.valueOf(it.get("code")));
+                row.createCell(1).setCellValue(String.valueOf(it.get("name")));
+                row.createCell(2).setCellValue(toDouble(it.get("balance")));
+            }
+            for (Map<String,Object> it : asList(d.get("liabilityItems"))) {
+                org.apache.poi.ss.usermodel.Row row = sh.createRow(r++);
+                row.createCell(0).setCellValue(String.valueOf(it.get("code")));
+                row.createCell(1).setCellValue(String.valueOf(it.get("name")));
+                row.createCell(2).setCellValue(toDouble(it.get("balance")));
+            }
+            r++;
+            org.apache.poi.ss.usermodel.Row s1 = sh.createRow(r++);
+            s1.createCell(0).setCellValue("资产合计"); s1.createCell(2).setCellValue(toDouble(d.get("assets")));
+            org.apache.poi.ss.usermodel.Row s2 = sh.createRow(r++);
+            s2.createCell(0).setCellValue("负债合计"); s2.createCell(2).setCellValue(toDouble(d.get("liabilities")));
+            org.apache.poi.ss.usermodel.Row s3 = sh.createRow(r++);
+            s3.createCell(0).setCellValue("所有者权益合计"); s3.createCell(2).setCellValue(toDouble(d.get("equity")));
+            org.apache.poi.ss.usermodel.Row s4 = sh.createRow(r++);
+            s4.createCell(0).setCellValue("负债和权益总计"); s4.createCell(2).setCellValue(toDouble(d.get("total_liability_equity")));
+        } else if ("income".equals(type)) {
+            Map<String,Object> d = report.incomeStatement(period);
+            org.apache.poi.ss.usermodel.Row s1 = sh.createRow(r++);
+            s1.createCell(0).setCellValue("营业收入"); s1.createCell(1).setCellValue(toDouble(d.get("revenue")));
+            org.apache.poi.ss.usermodel.Row s2 = sh.createRow(r++);
+            s2.createCell(0).setCellValue("营业成本"); s2.createCell(1).setCellValue(toDouble(d.get("cost")));
+            org.apache.poi.ss.usermodel.Row s3 = sh.createRow(r++);
+            s3.createCell(0).setCellValue("毛利润"); s3.createCell(1).setCellValue(toDouble(d.get("gross_profit")));
+            org.apache.poi.ss.usermodel.Row s4 = sh.createRow(r++);
+            s4.createCell(0).setCellValue("净利润"); s4.createCell(1).setCellValue(toDouble(d.get("net_profit")));
+            r++;
+            String[] heads = {"科目编码", "科目名称", "借方发生", "贷方发生", "期末余额"};
+            org.apache.poi.ss.usermodel.Row hr = sh.createRow(r++);
+            for (int i = 0; i < heads.length; i++) { org.apache.poi.ss.usermodel.Cell c = hr.createCell(i); c.setCellValue(heads[i]); c.setCellStyle(head); }
+            for (Map<String,Object> it : asList(d.get("items"))) {
+                org.apache.poi.ss.usermodel.Row row = sh.createRow(r++);
+                row.createCell(0).setCellValue(String.valueOf(it.get("subject_code")));
+                row.createCell(1).setCellValue(String.valueOf(it.get("subject_name")));
+                row.createCell(2).setCellValue(toDouble(it.get("debit_amount")));
+                row.createCell(3).setCellValue(toDouble(it.get("credit_amount")));
+                row.createCell(4).setCellValue(toDouble(it.get("end_balance")));
+            }
+        } else {
+            Map<String,Object> d = report.cashFlow(period);
+            org.apache.poi.ss.usermodel.Row s1 = sh.createRow(r++);
+            s1.createCell(0).setCellValue("现金流入"); s1.createCell(1).setCellValue(toDouble(d.get("cash_in")));
+            org.apache.poi.ss.usermodel.Row s2 = sh.createRow(r++);
+            s2.createCell(0).setCellValue("现金流出"); s2.createCell(1).setCellValue(toDouble(d.get("cash_out")));
+            org.apache.poi.ss.usermodel.Row s3 = sh.createRow(r++);
+            s3.createCell(0).setCellValue("净现金流"); s3.createCell(1).setCellValue(toDouble(d.get("net_cash")));
+            r++;
+            org.apache.poi.ss.usermodel.Row h1 = sh.createRow(r++);
+            h1.createCell(0).setCellValue("流入项目"); h1.createCell(1).setCellValue("金额");
+            h1.getCell(0).setCellStyle(head); h1.getCell(1).setCellStyle(head);
+            for (Map<String,Object> it : asList(d.get("inflow_items"))) {
+                org.apache.poi.ss.usermodel.Row row = sh.createRow(r++);
+                row.createCell(0).setCellValue(String.valueOf(it.get("name")));
+                row.createCell(1).setCellValue(toDouble(it.get("value")));
+            }
+            r++;
+            org.apache.poi.ss.usermodel.Row h2 = sh.createRow(r++);
+            h2.createCell(0).setCellValue("流出项目"); h2.createCell(1).setCellValue("金额");
+            h2.getCell(0).setCellStyle(head); h2.getCell(1).setCellStyle(head);
+            for (Map<String,Object> it : asList(d.get("outflow_items"))) {
+                org.apache.poi.ss.usermodel.Row row = sh.createRow(r++);
+                row.createCell(0).setCellValue(String.valueOf(it.get("name")));
+                row.createCell(1).setCellValue(toDouble(it.get("value")));
+            }
+        }
+        for (int i = 0; i < 5; i++) sh.setColumnWidth(i, 18 * 256);
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String,Object>> asList(Object o) {
+        if (o instanceof List) return (List<Map<String,Object>>) o;
+        return new ArrayList<>();
+    }
+
+    private double toDouble(Object v) {
+        if (v == null) return 0;
+        try { return Double.parseDouble(v.toString()); } catch (Exception e) { return 0; }
+    }
+
     // ── 销售目标达成率 ──
     @GetMapping("/target-progress") public Result targetProgress() {
         try {

@@ -89,7 +89,19 @@ export const bizApi = {
   replenishToPurchase: () => request<{ po_count: number; po_nos: string[] }>('/biz/replenish-to-purchase', { method: 'POST' }),
   salesTracking: () => request<any[]>('/biz/sales-tracking'),
   purchaseTracking: () => request<any[]>('/biz/purchase-tracking'),
+  productionTracking: () => request<any[]>('/biz/production-tracking'),
   inventoryAnalysis: () => request<any>('/biz/inventory-analysis'),
+  auditSearch: (params: { user?: string; module?: string; from?: string; to?: string; page?: number; size?: number }) => {
+    const q = new URLSearchParams();
+    if (params.user) q.set('user', params.user);
+    if (params.module) q.set('module', params.module);
+    if (params.from) q.set('from', params.from);
+    if (params.to) q.set('to', params.to);
+    q.set('page', String(params.page || 1));
+    q.set('size', String(params.size || 20));
+    return request<{ total: number; rows: any[]; modules: any[] }>(`/biz/audit-search?${q.toString()}`);
+  },
+  reportExcelAll: (period: string) => downloadBlob(`/biz/report/excel-all?period=${encodeURIComponent(period)}`, `财务报表_${period}.xlsx`),
   systemMonitor: () => request<any>('/biz/system-monitor'),
   backupSql: () => downloadBlob('/biz/backup', `erp_backup_${new Date().toISOString().slice(0, 10)}.sql`),
   importOrders: async (type: 'sales' | 'purchase', file: File) => {

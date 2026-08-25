@@ -1,9 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { type UserRole, ROLE_LABELS, ROLE_COLORS } from '../types';
+import { t, onLanguageChange } from '../utils/i18n';
 
 export default function Login() {
   const { login, register, sessionNotice, clearSessionNotice } = useAuth();
+  const [, forceLang] = useState(0);
+  useEffect(() => onLanguageChange(() => forceLang(x => x + 1)), []);
   const [isLogin, setIsLogin] = useState(true);
   const [showPw, setShowPw] = useState(false);
   const [username, setUsername] = useState(''); const [password, setPassword] = useState('');
@@ -32,8 +35,8 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-4" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 12px 30px rgba(99,102,241,0.4)' }}>
             <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">ERP 企业管理系统</h1>
-          <p className="text-indigo-200/60 text-sm">智能化企业管理平台 · 高效协同</p>
+          <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">{t('app.title')}</h1>
+          <p className="text-indigo-200/60 text-sm">{t('app.subtitle')}</p>
         </div>
         <div className="bg-white/8 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/15 p-8 erp-modal-panel">
           <div className="flex bg-white/5 rounded-xl p-1 mb-6">
@@ -45,14 +48,14 @@ export default function Login() {
           {success && <div className="bg-emerald-500/15 border border-emerald-500/25 rounded-xl p-3 mb-4 text-emerald-200 text-sm flex items-center gap-2"><svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/></svg>{success}</div>}
           {isLogin ? (
             <form onSubmit={handleLogin} className="space-y-4">
-              <div><label className={labelCls}>用户名</label><input type="text" value={username} onChange={e => setUsername(e.target.value)} className={inputCls} placeholder="请输入用户名" autoComplete="username"/></div>
-              <div><label className={labelCls}>密码</label>
+              <div><label className={labelCls}>{t('login.username')}</label><input type="text" value={username} onChange={e => setUsername(e.target.value)} className={inputCls} placeholder="请输入用户名" autoComplete="username"/></div>
+              <div><label className={labelCls}>{t('login.password')}</label>
                 <div className="relative">
                   <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} className={inputCls + ' pr-12'} placeholder="请输入密码" autoComplete="current-password"/>
                   <button type="button" onClick={() => setShowPw(s => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/80 transition-colors text-sm" title={showPw ? '隐藏密码' : '显示密码'}>{showPw ? '🙈' : '👁️'}</button>
                 </div>
               </div>
-              <button type="submit" disabled={loading} className="w-full py-3 text-white rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-50" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 8px 25px rgba(99,102,241,0.4)' }}>{loading ? '登录中...' : '登 录'}</button>
+              <button type="submit" disabled={loading} className="w-full py-3 text-white rounded-xl font-medium transition-all active:scale-[0.98] disabled:opacity-50" style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 8px 25px rgba(99,102,241,0.4)' }}>{loading ? '...' : t('login.submit')}</button>
               <div className="pt-1">
                 <p className="text-white/30 text-[11px] mb-2 text-center">演示账号一键填充（生产环境请关闭 SEED_DEMO_USERS）</p>
                 <div className="flex flex-wrap gap-1.5 justify-center">
