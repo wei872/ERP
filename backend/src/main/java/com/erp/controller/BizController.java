@@ -526,11 +526,73 @@ public class BizController {
             alerts.put("overdueReceivable", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
             alerts.put("overduePayable", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_payable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
             alerts.put("pendingApprovals", db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理'", Long.class));
+            try {
+                alerts.put("expiringContracts", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status='执行中' AND end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)", Long.class));
+                alerts.put("expiredContracts", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status='执行中' AND end_date<CURDATE()", Long.class));
+                ret.put("expiringContractList", db.queryForList("SELECT contract_no, contract_name, party_name, amount, end_date FROM cust_contract_main WHERE status='执行中' AND end_date<=DATE_ADD(CURDATE(), INTERVAL 30 DAY) ORDER BY end_date LIMIT 5"));
+            } catch (Exception ignored) {} // 未执行 upgrade3 时无合同表
             ret.put("alerts", alerts);
             ret.put("recentSales", db.queryForList("SELECT sales_no, customer_name, total_amount, sales_status FROM trade_sales_main ORDER BY id DESC LIMIT 5"));
             ret.put("recentApprovals", db.queryForList("SELECT approval_no, approval_type, applicant, amount, approval_status FROM oa_approval_main ORDER BY id DESC LIMIT 5"));
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("日报加载失败: " + e.getMessage()); }
+    }
+
+    // ── 销售目标达成率 ──
+    @GetMapping("/target-progress") public Result targetProgress() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            String curMonth = db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m')", String.class);
+            ret.put("month", curMonth);
+            List<Map<String,Object>> targets = db.queryForList(
+                "SELECT salesperson, COALESCE(SUM(target_amount),0) target FROM trade_sales_target WHERE target_month=? GROUP BY salesperson ORDER BY target DESC", curMonth);
+            Map<String, Map<String,Object>> actualMap = new LinkedHashMap<>();
+            for (Map<String,Object> r : db.queryForList(
+                    "SELECT sales_person, COALESCE(SUM(total_amount),0) amt, COUNT(*) cnt FROM trade_sales_main WHERE DATE_FORMAT(sales_date,'%Y-%m')=? GROUP BY sales_person", curMonth)) {
+                actualMap.put(String.valueOf(r.get("sales_person")), r);
+            }
+            List<Map<String,Object>> rows = new ArrayList<>();
+            BigDecimal totTarget = BigDecimal.ZERO, totActual = BigDecimal.ZERO;
+            for (Map<String,Object> t : targets) {
+                String person = String.valueOf(t.get("salesperson"));
+                BigDecimal target = new BigDecimal(t.get("target").toString());
+                Map<String,Object> a = actualMap.get(person);
+                BigDecimal actual = a == null ? BigDecimal.ZERO : new BigDecimal(a.get("amt").toString());
+                Long cnt = a == null ? 0L : ((Number)a.get("cnt")).longValue();
+                totTarget = totTarget.add(target);
+                totActual = totActual.add(actual);
+                Map<String,Object> row = new LinkedHashMap<>();
+                row.put("salesperson", person);
+                row.put("target", target);
+                row.put("actual", actual);
+                row.put("count", cnt);
+                row.put("rate", target.signum() > 0 ? actual.multiply(new BigDecimal("100")).divide(target, 1, java.math.RoundingMode.HALF_UP) : BigDecimal.ZERO);
+                rows.add(row);
+            }
+            // 无目标但有销售的人员也列出
+            for (Map.Entry<String, Map<String,Object>> e : actualMap.entrySet()) {
+                boolean has = false;
+                for (Map<String,Object> row : rows) if (e.getKey().equals(row.get("salesperson"))) { has = true; break; }
+                if (!has) {
+                    BigDecimal actual = new BigDecimal(e.getValue().get("amt").toString());
+                    totActual = totActual.add(actual);
+                    Map<String,Object> row = new LinkedHashMap<>();
+                    row.put("salesperson", e.getKey());
+                    row.put("target", BigDecimal.ZERO);
+                    row.put("actual", actual);
+                    row.put("count", ((Number)e.getValue().get("cnt")).longValue());
+                    row.put("rate", BigDecimal.ZERO);
+                    rows.add(row);
+                }
+            }
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("target", totTarget);
+            totals.put("actual", totActual);
+            totals.put("rate", totTarget.signum() > 0 ? totActual.multiply(new BigDecimal("100")).divide(totTarget, 1, java.math.RoundingMode.HALF_UP) : BigDecimal.ZERO);
+            ret.put("rows", rows);
+            ret.put("totals", totals);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("目标达成加载失败: " + e.getMessage()); }
     }
 
     // ── 销售毛利分析 + 安全库存补货建议 ──

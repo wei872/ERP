@@ -475,6 +475,37 @@ insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model',
   insert('trade_stock_log', ['log_no', 'product_code', 'product_name', 'warehouse', 'change_type', 'before_qty', 'change_qty', 'after_qty', 'ref_no', 'operator', 'change_date'], logRows);
 }
 
+// ── 销售目标（近9个月 × 3名销售，随业务增长爬坡） ──
+{
+  const targetRows = [];
+  for (let m = 8; m >= 0; m--) {
+    const growth = 1 + (8 - m) * 0.04;
+    [['张三', 95000], ['周八', 75000], ['王小明', 45000]].forEach(([p, base]) => {
+      targetRows.push([periodOfMonth(m), q(p), money(Math.round(base * growth / 500) * 500), q('')]);
+    });
+  }
+  insert('trade_sales_target', ['target_month', 'salesperson', 'target_amount', 'remark'], targetRows);
+}
+
+// ── 合同档案（含临期30天内与已过期未完结的预警样例） ──
+{
+  const dPlus = n => `DATE_ADD(CURDATE(), INTERVAL ${n} DAY)`;
+  const contracts = [
+    ['CT-2026-001', '智能网关年度框架协议', '销售合同', '华东智能制造有限公司', 1200000, 300, 290, dPlus(65), '张三', '执行中'],
+    ['CT-2026-002', '传感器批量供货合同', '销售合同', '南方物联科技公司', 460000, 200, 190, dPlus(20), '张三', '执行中'],
+    ['CT-2026-003', '控制主板定制开发合同', '销售合同', '长江智慧能源公司', 820000, 150, 140, dPlus(120), '王小明', '执行中'],
+    ['CT-2026-004', '港口设备供货合同', '销售合同', '沿海港口设备公司', 350000, 120, 110, dPlus(-10), '周八', '执行中'],
+    ['CT-2026-005', '芯片年度采购框架', '采购合同', '深圳芯联电子公司', 900000, 260, 250, dPlus(105), '周八', '执行中'],
+    ['CT-2026-006', '显示模组采购合同', '采购合同', '苏州光电科技公司', 280000, 180, 170, dPlus(25), '周八', '执行中'],
+    ['CT-2025-018', '农机定制合同', '销售合同', '中原农机股份公司', 540000, 480, 470, dAgo(110), '王小明', '已完结'],
+    ['CT-2025-015', '包装材料采购合同', '采购合同', '佛山包装材料厂', 86000, 420, 410, dAgo(60), '周八', '已完结'],
+    ['CT-2026-007', '北方自动化试点合同', '销售合同', '北方自动化设备公司', 150000, 40, 30, dPlus(150), '张三', '草稿'],
+    ['CT-2025-011', '旧产线改造合同', '销售合同', '深港电子科技公司', 220000, 560, 550, dAgo(200), '张三', '已终止'],
+  ];
+  insert('cust_contract_main', ['contract_no', 'contract_name', 'contract_type', 'party_name', 'amount', 'sign_date', 'start_date', 'end_date', 'owner', 'status', 'remark'],
+    contracts.map(c => [q(c[0]), q(c[1]), q(c[2]), q(c[3]), money(c[4]), dAgo(c[5]), dAgo(c[6]), c[7], q(c[8]), q(c[9]), q('')]));
+}
+
 // ── 仓库主数据（多仓库管理） ──
 insert('trade_warehouse_main', ['warehouse_code', 'warehouse_name', 'warehouse_type', 'manager', 'location', 'status', 'remark'], [
   [q('WH-01'), q(WH_RAW), q('原料仓'), q('李四'), q('A区-1层'), q('启用'), q('原材料/元器件存储，采购入库与生产领料')],

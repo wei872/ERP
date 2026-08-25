@@ -72,6 +72,7 @@ export const bizApi = {
   voucherAudit: (no: string) => request(`/biz/voucher-audit/${encodeURIComponent(no)}`, { method: 'POST' }),
   voucherPost: (no: string) => request(`/biz/voucher-post/${encodeURIComponent(no)}`, { method: 'POST' }),
   dailyReport: () => request<any>('/biz/daily-report'),
+  targetProgress: () => request<any>('/biz/target-progress'),
   importExcel: async (type: string, file: File) => {
     const token = localStorage.getItem('erp_token');
     const fd = new FormData();

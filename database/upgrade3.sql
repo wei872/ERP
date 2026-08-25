@@ -109,6 +109,46 @@ INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, s
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('trade_warehouse_main','status','common.enable');
 
+-- ── 销售目标管理 ──
+CREATE TABLE IF NOT EXISTS trade_sales_target (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  target_month VARCHAR(10) COMMENT '目标月份 yyyy-MM',
+  salesperson VARCHAR(50) COMMENT '销售人员',
+  target_amount DECIMAL(18,2) COMMENT '目标金额',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 合同管理 ──
+CREATE TABLE IF NOT EXISTS cust_contract_main (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_no VARCHAR(50) COMMENT '合同编号',
+  contract_name VARCHAR(200) COMMENT '合同名称',
+  contract_type VARCHAR(30) COMMENT '销售合同/采购合同/框架协议',
+  party_name VARCHAR(100) COMMENT '对方单位',
+  amount DECIMAL(18,2) COMMENT '合同金额',
+  sign_date DATE,
+  start_date DATE,
+  end_date DATE,
+  owner VARCHAR(50) COMMENT '负责人',
+  status VARCHAR(20) DEFAULT '执行中',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('trade_sales_target','销售目标','进销存管理','销售管理',904),
+('cust_contract_main','合同管理','客户供应商','合同档案',905);
+
+INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_no) VALUES
+('doc.status','草稿','草稿','gray',39),
+('doc.status','执行中','执行中','blue',40),
+('doc.status','已完结','已完结','green',41),
+('doc.status','已终止','已终止','red',42);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('cust_contract_main','status','doc.status');
+
 -- 批次/编码规则表注册进通用菜单与字典
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('trade_batch_trace','批次追溯台账','进销存管理','批次追溯',901),

@@ -58,6 +58,17 @@ export default function WorkflowPage() {
     catch (e: any) { toastFn('驳回失败: ' + e.message); }
   };
 
+  // 快捷审批：卡片上一键通过/驳回（移动端无需进详情）
+  const quickApprove = async (no: string) => {
+    try { await bizApi.approve(no, '同意'); toastFn('已通过'); load(); }
+    catch (e: any) { toastFn('通过失败: ' + (e.message || '')); }
+  };
+  const quickReject = async (no: string) => {
+    if (!confirm('确认驳回该审批？')) return;
+    try { await bizApi.reject(no, '驳回'); toastFn('已驳回'); load(); }
+    catch (e: any) { toastFn('驳回失败: ' + (e.message || '')); }
+  };
+
   const doSubmit = async () => {
     if (!currentUser) return;
     if (!submitType) { toastFn('请选择审批类型'); return; }
@@ -174,10 +185,12 @@ export default function WorkflowPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
                   {Number(t.amount) > 0 && <span className="text-sm font-bold text-emerald-600">{money(t.amount)}</span>}
                   <span className="px-2.5 py-1 rounded-full text-xs bg-amber-100 text-amber-700">{t.task_status}</span>
-                  <button onClick={() => openDetail(t.instance_no)} className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg">详情</button>
+                  <button onClick={() => openDetail(t.instance_no)} className="px-3.5 py-2 bg-white border border-slate-200 text-slate-600 text-sm rounded-lg hover:border-blue-300 transition-colors">详情</button>
+                  <button onClick={() => quickApprove(t.instance_no)} className="px-3.5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-sm rounded-lg transition-colors">✓ 通过</button>
+                  <button onClick={() => quickReject(t.instance_no)} className="px-3.5 py-2 bg-white border border-red-200 text-red-500 text-sm rounded-lg hover:bg-red-50 transition-colors">✕ 驳回</button>
                 </div>
               </div>
               {t.remark && t.remark !== '-' && <div className="mt-3 text-xs text-gray-400 border-l-2 border-gray-200 pl-3">{t.remark}</div>}

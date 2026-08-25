@@ -24,10 +24,12 @@ function Stat({ icon, label, value, hint, tone }: { icon: string; label: string;
 /** 经营日报：今日业务一屏汇总（今日发生 + 本月累计 + 风险提醒 + 最近动态） */
 export default function DailyReportPage() {
   const [data, setData] = useState<any>(null);
+  const [targetData, setTargetData] = useState<any>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     bizApi.dailyReport().then(r => setData(r.data)).catch(e => setError(e.message || '加载失败'));
+    bizApi.targetProgress().then(r => setTargetData(r.data)).catch(() => {});
   }, []);
 
   if (error) return <div className="p-16 text-center"><div className="text-5xl mb-3">⚠️</div><p className="text-red-500">{error}</p></div>;
@@ -67,6 +69,50 @@ export default function DailyReportPage() {
         </div>
       </div>
 
+      {/* 销售目标达成率 */}
+      {targetData && (targetData.rows || []).length > 0 && (() => {
+        const tt = targetData.totals || {};
+        const totRate = Number(tt.rate) || 0;
+        return (
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><span className="w-1 h-4 rounded-full bg-gradient-to-b from-emerald-500 to-teal-500"></span>销售目标达成率（{targetData.month}）</h3>
+            <div className="erp-card p-5 space-y-4">
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="text-slate-500">团队总达成</span>
+                  <span className="tabular-nums font-semibold text-slate-700">¥{money(tt.actual)} / ¥{money(tt.target)}　<b className={totRate >= 100 ? 'text-emerald-600' : totRate >= 60 ? 'text-blue-600' : 'text-amber-600'}>{totRate.toFixed(1)}%</b></span>
+                </div>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div className={`h-full rounded-full transition-all duration-700 ${totRate >= 100 ? 'bg-gradient-to-r from-emerald-400 to-teal-500' : 'bg-gradient-to-r from-indigo-400 to-violet-500'}`} style={{ width: `${Math.min(100, totRate)}%` }}></div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+                {(targetData.rows || []).map((r: any) => {
+                  const rate = Number(r.rate) || 0;
+                  const hasTarget = Number(r.target) > 0;
+                  return (
+                    <div key={r.salesperson} className="rounded-xl border border-slate-100 p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold text-slate-700">{r.salesperson}</span>
+                        {hasTarget
+                          ? <span className={`text-xs font-bold tabular-nums px-2 py-0.5 rounded-full ${rate >= 100 ? 'bg-emerald-50 text-emerald-600' : rate >= 60 ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>{rate.toFixed(1)}%</span>
+                          : <span className="text-[10px] text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full">未设目标</span>}
+                      </div>
+                      {hasTarget && (
+                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden mb-2">
+                          <div className={`h-full rounded-full ${rate >= 100 ? 'bg-emerald-400' : rate >= 60 ? 'bg-blue-400' : 'bg-amber-400'}`} style={{ width: `${Math.min(100, rate)}%` }}></div>
+                        </div>
+                      )}
+                      <p className="text-[11px] text-slate-400 tabular-nums">实际 ¥{money(r.actual)}{hasTarget ? ` / 目标 ¥${money(r.target)}` : ''} · {Number(r.count || 0)} 单</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* 本月累计 + 风险提醒 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="erp-card p-5">
@@ -105,6 +151,29 @@ export default function DailyReportPage() {
               <span className="text-xs text-slate-600">🔁 待处理审批</span>
               <span className={`text-sm font-bold tabular-nums ${Number(a.pendingApprovals) > 0 ? 'text-violet-600' : 'text-slate-400'}`}>{Number(a.pendingApprovals || 0)} 条</span>
             </div>
+            <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${Number(a.expiredContracts) > 0 ? 'bg-red-50/60 border-red-200' : 'bg-slate-50 border-slate-100'}`}>
+              <span className="text-xs text-slate-600">📄 合同已过期未完结</span>
+              <span className={`text-sm font-bold tabular-nums ${Number(a.expiredContracts) > 0 ? 'text-red-500' : 'text-slate-400'}`}>{Number(a.expiredContracts || 0)} 份</span>
+            </div>
+            <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${Number(a.expiringContracts) > 0 ? 'bg-amber-50/60 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
+              <span className="text-xs text-slate-600">📄 合同 30 天内到期</span>
+              <span className={`text-sm font-bold tabular-nums ${Number(a.expiringContracts) > 0 ? 'text-amber-600' : 'text-slate-400'}`}>{Number(a.expiringContracts || 0)} 份</span>
+            </div>
+            {(data.expiringContractList || []).length > 0 && (
+              <div className="mt-1 space-y-1.5">
+                {(data.expiringContractList || []).map((c: any) => {
+                  const end = String(c.end_date || '').slice(0, 10);
+                  const days = Math.ceil((new Date(end.replace(/-/g, '/')).getTime() - Date.now()) / 86400000);
+                  return (
+                    <div key={c.id} className="flex items-center justify-between text-[11px] bg-white border border-slate-100 rounded-lg px-2.5 py-1.5">
+                      <span className="font-mono text-indigo-600 shrink-0">{c.contract_no}</span>
+                      <span className="text-slate-600 truncate mx-2">{c.contract_name}</span>
+                      <span className={`shrink-0 font-medium ${days < 0 ? 'text-red-500' : days <= 10 ? 'text-amber-600' : 'text-slate-500'}`}>{days < 0 ? `已过期 ${-days} 天` : `${days} 天后到期`}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>

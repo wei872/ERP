@@ -22,6 +22,7 @@ const AuditLogPage = lazy(() => import('./AuditLogPage'));
 const ProfitPage = lazy(() => import('./ProfitPage'));
 const BigScreen = lazy(() => import('./BigScreen'));
 const DailyReportPage = lazy(() => import('./DailyReportPage'));
+const DictManagePage = lazy(() => import('./DictManagePage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -31,7 +32,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -84,6 +85,7 @@ export default function Layout() {
     { label: '财务模版库', icon: '💰', page: { type: 'finance' } },
     { label: '审计日志', icon: '🕵️', page: { type: 'audit' } },
     { label: '毛利分析', icon: '💹', page: { type: 'profit' } },
+    { label: '数据字典', icon: '📖', page: { type: 'dicts' } },
   ];
   const gResults = useMemo(() => {
     const q = gq.trim().toLowerCase();
@@ -172,6 +174,7 @@ export default function Layout() {
     if (page.type === 'audit') return '🕵️ 审计日志';
     if (page.type === 'profit') return '💹 销售毛利分析';
     if (page.type === 'daily') return '📰 经营日报';
+    if (page.type === 'dicts') return '📖 数据字典维护';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -193,6 +196,7 @@ export default function Layout() {
         ))}
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{expanded && <span className="flex items-center gap-2">用户管理{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{expanded && <span>RBAC 权限矩阵</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'dicts' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'dicts' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">📖</span>{expanded && <span>数据字典维护</span>}</button>)}
         {expanded && favTables.length > 0 && (<div className="mb-1">
           <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">⭐ 常用收藏</div>
           {favTables.map(tk => { const t = tables.find(x => x.table === tk); if (!t) return null; return (
@@ -351,6 +355,7 @@ export default function Layout() {
         {page.type === 'audit' && <AuditLogPage />}
         {page.type === 'profit' && <ProfitPage />}
         {page.type === 'daily' && <DailyReportPage />}
+        {page.type === 'dicts' && <DictManagePage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
         </Suspense>
