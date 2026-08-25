@@ -26,7 +26,8 @@ const DailyReportPage = lazy(() => import('./DailyReportPage'));
 const DictManagePage = lazy(() => import('./DictManagePage'));
 const RecycleBinPage = lazy(() => import('./RecycleBinPage'));
 const MobileApprovalPage = lazy(() => import('./MobileApprovalPage'));
-const SalesTrackingPage = lazy(() => import('./SalesTrackingPage'));
+const OrderTrackingPage = lazy(() => import('./OrderTrackingPage'));
+const InventoryAnalysisPage = lazy(() => import('./InventoryAnalysisPage'));
 const DataImportPage = lazy(() => import('./DataImportPage'));
 const SystemMonitorPage = lazy(() => import('./SystemMonitorPage'));
 
@@ -38,7 +39,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -46,6 +47,8 @@ const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[]
   { type: 'mapproval',      label: '移动审批',     icon: '📱', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'tracking',       label: '销售执行跟踪', icon: '🚚', roles: ['admin','sales','accounting'] },
   { type: 'import',         label: '数据导入中心', icon: '⬆️', roles: ['admin','sales','procurement'] },
+  { type: 'ptracking',      label: '采购执行跟踪', icon: '🛒', roles: ['admin','procurement','accounting'] },
+  { type: 'invanalysis',    label: '库存周转分析', icon: '🔄', roles: ['admin','warehouse','accounting'] },
   { type: 'voucher',        label: '会计凭证',     icon: '📒', roles: ['admin','accounting'] },
   { type: 'statements',     label: '三大财务报表', icon: '📊', roles: ['admin','accounting'] },
   { type: 'reconciliation', label: '应收应付核销', icon: '💸', roles: ['admin','accounting'] },
@@ -87,6 +90,8 @@ export default function Layout() {
     { label: '销售执行跟踪', icon: '🚚', page: { type: 'tracking' } },
     { label: '数据导入中心', icon: '⬆️', page: { type: 'import' } },
     { label: '系统监控', icon: '📡', page: { type: 'monitor' } },
+    { label: '采购执行跟踪', icon: '🛒', page: { type: 'ptracking' } },
+    { label: '库存周转分析', icon: '🔄', page: { type: 'invanalysis' } },
     { label: '报表中心', icon: '📈', page: { type: 'report' } },
     { label: '工作流审批', icon: '🔁', page: { type: 'workflow' } },
     { label: '会计凭证', icon: '📒', page: { type: 'voucher' } },
@@ -134,9 +139,22 @@ export default function Layout() {
   const [todos, setTodos] = useState<any>(null);
   const [todoOpen, setTodoOpen] = useState(false);
   const loadTodos = useCallback(() => { bizApi.todos().then(r => setTodos(r.data)).catch(() => {}); }, []);
-  useEffect(() => { loadTodos(); const iv = setInterval(loadTodos, 60000); return () => clearInterval(iv); }, [loadTodos]);
+  useEffect(() => { loadTodos(); const iv = setInterval(loadTodos, 30000); return () => clearInterval(iv); }, [loadTodos]);
   const n = (v: unknown) => Number(v) || 0;
   const todoTotal = todos ? n(todos.pendingApprovals) + n(todos.lowStock?.count) + n(todos.overdueReceivable?.count) + n(todos.overduePayable?.count) + n(todos.pendingUsers) : 0;
+  const prevTodoRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (prevTodoRef.current !== null && todoTotal > prevTodoRef.current && todoTotal > 0) {
+      try {
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification('ERP 新待办提醒', { body: `当前有 ${todoTotal} 项待办需要处理（审批/库存预警/逾期款项）` });
+        } else if ('Notification' in window && Notification.permission === 'default') {
+          Notification.requestPermission().catch(() => {});
+        }
+      } catch { /* 浏览器不支持时静默 */ }
+    }
+    prevTodoRef.current = todoTotal;
+  }, [todoTotal]);
   const todoJump = (p: Page) => { go(p); setTodoOpen(false); };
 
   // ── 移动端全局搜索（全屏层） ──
@@ -219,6 +237,8 @@ export default function Layout() {
     if (page.type === 'tracking') return '🚚 销售执行跟踪';
     if (page.type === 'import') return '⬆️ 数据导入中心';
     if (page.type === 'monitor') return '📡 系统运行监控';
+    if (page.type === 'ptracking') return '🛒 采购执行跟踪';
+    if (page.type === 'invanalysis') return '🔄 库存周转分析';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -318,7 +338,7 @@ export default function Layout() {
           <div className="relative">
             <button onClick={() => { setTodoOpen(o => !o); loadTodos(); }} title="待办中心" className="relative p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 00-4-5.7V5a2 2 0 10-4 0v.3A6 6 0 006 11v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-              {todoTotal > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm">{todoTotal > 99 ? '99+' : todoTotal}</span>}
+              {todoTotal > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center shadow-sm erp-badge-pulse">{todoTotal > 99 ? '99+' : todoTotal}</span>}
             </button>
             {todoOpen && (<>
               <div className="fixed inset-0 z-40" onClick={() => setTodoOpen(false)} />
@@ -412,7 +432,9 @@ export default function Layout() {
         {page.type === 'dicts' && <DictManagePage />}
         {page.type === 'recycle' && <RecycleBinPage />}
         {page.type === 'mapproval' && <MobileApprovalPage />}
-        {page.type === 'tracking' && <SalesTrackingPage />}
+        {page.type === 'tracking' && <OrderTrackingPage kind="sales" />}
+        {page.type === 'ptracking' && <OrderTrackingPage kind="purchase" />}
+        {page.type === 'invanalysis' && <InventoryAnalysisPage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { bizApi } from '../api';
+import { toastNotify } from '../utils/toast';
 
 function fmtUptime(sec: number): string {
   if (!Number.isFinite(sec) || sec <= 0) return '—';
@@ -39,6 +40,18 @@ export default function SystemMonitorPage() {
         <span className={`px-3 py-1.5 rounded-full text-xs font-bold ${h.db === 'UP' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}`}>
           {h.db === 'UP' ? '● 运行正常' : '● 数据库异常'}
         </span>
+      </div>
+
+      {/* 数据备份 */}
+      <div className="erp-card p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">💾 数据备份</h3>
+          <p className="text-xs text-slate-400 mt-1">一键导出全库逻辑备份（全部数据表生成 INSERT 语句的 .sql 文件，恢复时先建库再导入）。建议配合 crontab 每日自动备份（见 docs/DEPLOYMENT.md）。</p>
+        </div>
+        <button onClick={async () => {
+          try { toastNotify('正在生成备份文件…'); await bizApi.backupSql(); toastNotify('备份文件已开始下载'); }
+          catch (e: any) { toastNotify('备份失败：' + (e.message || '')); }
+        }} className="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-xl text-sm font-semibold shadow-md hover:opacity-90 shrink-0">⬇ 下载数据备份 (.sql)</button>
       </div>
 
       {/* 健康卡片 */}

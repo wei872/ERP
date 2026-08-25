@@ -1029,6 +1029,172 @@ public class BizController {
         } catch (Exception e) { return Result.error("导入失败: " + e.getMessage()); }
     }
 
+    // ── 采购订单执行跟踪：下单 → 审批 → 入库 → 付款 四段进度 ──
+    @GetMapping("/purchase-tracking") public Result purchaseTracking() {
+        try {
+            List<Map<String,Object>> purchases = db.queryForList("SELECT * FROM trade_purchase_main ORDER BY id DESC LIMIT 25");
+            // 应付付款进度（按单号归集，备注格式：采购单:PO-xxx）
+            Map<String, java.math.BigDecimal[]> payMap = new LinkedHashMap<>();
+            try {
+                for (Map<String,Object> r : db.queryForList("SELECT remark, COALESCE(SUM(total_amount),0) t, COALESCE(SUM(remain_amount),0) rm FROM finance_payable_main GROUP BY remark")) {
+                    String remark = String.valueOf(r.getOrDefault("remark", ""));
+                    int idx = remark.indexOf(':');
+                    if (idx >= 0 && idx < remark.length() - 1) {
+                        payMap.put(remark.substring(idx + 1), new java.math.BigDecimal[]{ new java.math.BigDecimal(r.get("t").toString()), new java.math.BigDecimal(r.get("rm").toString()) });
+                    }
+                }
+            } catch (Exception ignored) {}
+            List<Map<String,Object>> rows = new ArrayList<>();
+            for (Map<String,Object> s : purchases) {
+                String poNo = String.valueOf(s.get("purchase_no"));
+                String status = String.valueOf(s.getOrDefault("purchase_status", ""));
+                int stage = 0; // 0 下单
+                if ("已审批".equals(status) || "已入库".equals(status) || "已完成".equals(status)) stage = 1;
+                if ("已入库".equals(status)) stage = 2;
+                java.math.BigDecimal payTotal = java.math.BigDecimal.ZERO, payRemain = java.math.BigDecimal.ZERO;
+                java.math.BigDecimal[] pay = payMap.get(poNo);
+                boolean paidOff = false;
+                if (pay != null) {
+                    payTotal = pay[0]; payRemain = pay[1];
+                    if (payTotal.signum() > 0 && payRemain.signum() == 0) { paidOff = true; stage = 3; }
+                }
+                Map<String,Object> row = new LinkedHashMap<>();
+                row.put("order_no", poNo);
+                row.put("party_name", s.get("supplier_name"));
+                row.put("total_amount", s.get("total_amount"));
+                row.put("order_date", s.get("purchase_date"));
+                row.put("order_status", status);
+                row.put("shipping_status", String.valueOf(s.getOrDefault("arrival_status", "")));
+                row.put("stage", stage);
+                row.put("paid_off", paidOff);
+                row.put("rcv_total", payTotal);
+                row.put("rcv_remain", payRemain);
+                row.put("rcv_progress", payTotal.signum() > 0
+                    ? payTotal.subtract(payRemain).multiply(new java.math.BigDecimal("100")).divide(payTotal, 0, java.math.RoundingMode.HALF_UP)
+                    : java.math.BigDecimal.ZERO);
+                rows.add(row);
+            }
+            return Result.ok(rows);
+        } catch (Exception e) { return Result.error("采购跟踪加载失败: " + e.getMessage()); }
+    }
+
+    // ── 库存周转分析：周转率 / 可销天数 / 呆滞料 / 出入库月度趋势 ──
+    @GetMapping("/inventory-analysis") public Result inventoryAnalysis() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            java.math.BigDecimal invValue = java.math.BigDecimal.ZERO;
+            try {
+                java.math.BigDecimal v = db.queryForObject("SELECT COALESCE(SUM(total_value),0) FROM trade_inventory_balance", java.math.BigDecimal.class);
+                if (v != null) invValue = v;
+            } catch (Exception ignored) {}
+            java.math.BigDecimal out90 = java.math.BigDecimal.ZERO;
+            try {
+                java.math.BigDecimal v = db.queryForObject(
+                    "SELECT COALESCE(SUM(d.qty * d.unit_cost),0) FROM trade_stock_out_detail d " +
+                    "JOIN trade_stock_out_main m ON m.out_no=d.out_no WHERE m.out_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)", java.math.BigDecimal.class);
+                if (v != null) out90 = v;
+            } catch (Exception ignored) {}
+            ret.put("inventory_value", invValue);
+            ret.put("out_90d_cost", out90);
+            java.math.BigDecimal turnover = java.math.BigDecimal.ZERO;
+            java.math.BigDecimal days = java.math.BigDecimal.ZERO;
+            if (invValue.signum() > 0) {
+                turnover = out90.divide(invValue, 2, java.math.RoundingMode.HALF_UP);
+                if (turnover.signum() > 0) days = new java.math.BigDecimal("90").divide(turnover, 0, java.math.RoundingMode.HALF_UP);
+            }
+            ret.put("turnover_rate_90d", turnover);
+            ret.put("sellable_days", days);
+            // 呆滞料：近90天无出库记录的存货（按金额TOP5）
+            try {
+                ret.put("slow_moving", db.queryForList(
+                    "SELECT b.product_code, b.product_name, b.qty, b.total_value FROM trade_inventory_balance b " +
+                    "WHERE b.total_value > 0 AND NOT EXISTS (SELECT 1 FROM trade_stock_out_detail d WHERE d.product_code=b.product_code AND d.id IN " +
+                    "(SELECT d2.id FROM trade_stock_out_detail d2 JOIN trade_stock_out_main m2 ON m2.out_no=d2.out_no WHERE m2.out_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY))) " +
+                    "ORDER BY b.total_value DESC LIMIT 5"));
+            } catch (Exception e) { ret.put("slow_moving", new ArrayList<>()); }
+            // 近6个月出入库金额趋势
+            List<Map<String,Object>> trend = new ArrayList<>();
+            try {
+                Map<String, Map<String,Object>> byMonth = new LinkedHashMap<>();
+                for (Map<String,Object> r : db.queryForList(
+                        "SELECT DATE_FORMAT(in_date,'%Y-%m') m, COALESCE(SUM(total_amount),0) v FROM trade_stock_in_main WHERE in_date >= DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL 5 MONTH) GROUP BY DATE_FORMAT(in_date,'%Y-%m')")) {
+                    byMonth.computeIfAbsent(String.valueOf(r.get("m")), k -> { Map<String,Object> mm = new LinkedHashMap<>(); mm.put("name", k); mm.put("in_value", java.math.BigDecimal.ZERO); mm.put("out_value", java.math.BigDecimal.ZERO); return mm; })
+                        .put("in_value", r.get("v"));
+                }
+                for (Map<String,Object> r : db.queryForList(
+                        "SELECT DATE_FORMAT(out_date,'%Y-%m') m, COALESCE(SUM(total_amount),0) v FROM trade_stock_out_main WHERE out_date >= DATE_SUB(DATE_FORMAT(CURDATE(),'%Y-%m-01'), INTERVAL 5 MONTH) GROUP BY DATE_FORMAT(out_date,'%Y-%m')")) {
+                    byMonth.computeIfAbsent(String.valueOf(r.get("m")), k -> { Map<String,Object> mm = new LinkedHashMap<>(); mm.put("name", k); mm.put("in_value", java.math.BigDecimal.ZERO); mm.put("out_value", java.math.BigDecimal.ZERO); return mm; })
+                        .put("out_value", r.get("v"));
+                }
+                List<String> months = new ArrayList<>(byMonth.keySet());
+                java.util.Collections.sort(months);
+                for (String m : months) trend.add(byMonth.get(m));
+            } catch (Exception ignored) {}
+            ret.put("trend", trend);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("库存分析加载失败: " + e.getMessage()); }
+    }
+
+    // ── 数据库逻辑备份导出（全表 INSERT 语句，管理员专用） ──
+    @GetMapping("/backup")
+    public ResponseEntity<byte[]> backupSql(HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return ResponseEntity.status(403).build();
+        try {
+            List<String> tables = db.queryForList("SHOW TABLES", String.class);
+            StringBuilder sb = new StringBuilder();
+            String ts = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
+            sb.append("-- ERP 数据备份（逻辑备份：全表数据，INSERT 语句）\n");
+            sb.append("-- 生成时间: ").append(new java.util.Date()).append("  表数量: ").append(tables.size()).append("\n");
+            sb.append("-- 恢复：先按顺序执行 database/init.sql、upgrade*.sql 建库，再导入本文件（INSERT IGNORE 幂等）\n");
+            sb.append("SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n\n");
+            for (String t : tables) {
+                if (!t.matches("^[a-zA-Z0-9_]+$")) continue;
+                List<Map<String,Object>> rows;
+                try { rows = db.queryForList("SELECT * FROM `" + t + "`"); } catch (Exception e) { continue; }
+                if (rows.isEmpty()) continue;
+                sb.append("-- ── ").append(t).append(" (").append(rows.size()).append(" 行) ──\n");
+                int n = 0;
+                for (Map<String,Object> row : rows) {
+                    n++;
+                    if (n == 1) sb.append("INSERT IGNORE INTO `").append(t).append("` VALUES ");
+                    else sb.append(",");
+                    sb.append("(");
+                    boolean first = true;
+                    for (Object v : row.values()) {
+                        if (!first) sb.append(",");
+                        first = false;
+                        sb.append(sqlLiteral(v));
+                    }
+                    sb.append(")");
+                    if (n % 50 == 0 || n == rows.size()) sb.append(";\n");
+                }
+                sb.append("\n");
+            }
+            sb.append("SET FOREIGN_KEY_CHECKS=1;\n");
+            byte[] data = sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            audit.log(user(req), "系统", "数据备份", "全库" + tables.size() + "表/" + data.length + "字节", audit.getIp(req));
+            return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''erp_backup_" + ts + ".sql")
+                .contentType(MediaType.parseMediaType("application/sql;charset=UTF-8"))
+                .body(data);
+        } catch (Exception e) {
+            return ResponseEntity.status(500).build();
+        }
+    }
+
+    private String sqlLiteral(Object v) {
+        if (v == null) return "NULL";
+        if (v instanceof Number) return v.toString();
+        if (v instanceof byte[]) {
+            byte[] b = (byte[]) v;
+            StringBuilder hx = new StringBuilder("X'");
+            for (byte x : b) hx.append(String.format("%02X", x));
+            return hx.append("'").toString();
+        }
+        String s = v.toString().replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r");
+        return "'" + s + "'";
+    }
+
     // ── 销售目标达成率 ──
     @GetMapping("/target-progress") public Result targetProgress() {
         try {
