@@ -263,6 +263,63 @@ CREATE TABLE IF NOT EXISTS sys_attachment (
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('sys_attachment','附件管理','系统维护','附件管理',916);
 
+-- ── 消息已读状态（消息中心按用户持久化） ──
+CREATE TABLE IF NOT EXISTS sys_message_state (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  msg_key VARCHAR(120) COMMENT '消息稳定标识',
+  username VARCHAR(50),
+  state VARCHAR(20) DEFAULT 'read',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_msg_user (msg_key, username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ── 报表邮件订阅 + 发件箱 ──
+CREATE TABLE IF NOT EXISTS sys_report_subscription (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  username VARCHAR(50),
+  email VARCHAR(120) COMMENT '收件邮箱',
+  report_type VARCHAR(30) COMMENT 'daily经营日报/weekly周报/finance财务报表',
+  frequency VARCHAR(20) DEFAULT 'daily' COMMENT 'daily/weekly',
+  enabled INT DEFAULT 1,
+  last_sent_at DATETIME NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_sub_user_type (username, report_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS sys_report_outbox (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  subscription_id BIGINT,
+  email VARCHAR(120),
+  subject VARCHAR(200),
+  body LONGTEXT COMMENT '报表正文(HTML/文本)',
+  status VARCHAR(20) DEFAULT 'pending' COMMENT 'pending待发送/sent已发送/simulated模拟/failed失败',
+  error_msg VARCHAR(500),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME NULL,
+  KEY idx_outbox_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('sys_message_state','消息已读状态','系统维护','消息管理',917),
+('sys_report_subscription','报表订阅','系统维护','报表订阅',918),
+('sys_report_outbox','报表发件箱','系统维护','报表订阅',919);
+
+-- ── 打印模板自定义（对账单等抬头/落款/列选择） ──
+CREATE TABLE IF NOT EXISTS sys_print_template (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  template_key VARCHAR(60) COMMENT '模板键，如 statement',
+  title VARCHAR(200) COMMENT '打印标题',
+  company_line VARCHAR(200) COMMENT '公司抬头行',
+  footer VARCHAR(500) COMMENT '落款/备注',
+  fields_json LONGTEXT COMMENT '可见列配置JSON',
+  updated_by VARCHAR(50),
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_print_key (template_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_print_template(template_key, title, company_line, footer, fields_json, updated_by) VALUES
+('statement', '客 户 对 账 单', '', '如有异议请于 7 个工作日内与我司财务部联系核对。', '["receivable_no","created_at","due_date","total_amount","received_amount","remain_amount","status"]', '系统');
+
 INSERT IGNORE INTO finance_voucher_template(template_name, description, lines_json, created_by) VALUES
 ('提现备用金', '从银行提取现金作为备用金（借:1001 库存现金 / 贷:1002 银行存款）',
  '[{"subject_code":"1001","subject_name":"库存现金","debit_amount":5000,"credit_amount":0,"summary":"提现备用金"},{"subject_code":"1002","subject_name":"银行存款","debit_amount":0,"credit_amount":5000,"summary":"提现备用金"}]', '系统'),

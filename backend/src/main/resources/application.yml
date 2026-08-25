@@ -43,6 +43,16 @@ jwt:
   # Token 有效期（毫秒），默认 24 小时
   expiration: ${JWT_EXPIRATION:86400000}
 
+# 邮件服务（报表订阅投递用）：未配置时报表照常生成并标记为"模拟"
+# 生产配置示例：
+#   spring:
+#     mail:
+#       host: smtp.exmail.qq.com
+#       port: 465
+#       username: report@yourcompany.com
+#       password: <授权码>
+#       properties: { mail.smtp.auth: true, mail.smtp.ssl.enable: true }
+
 # 跨域：仅对独立部署前端的场景需要配置，逗号分隔的 Origin 白名单；
 # 默认仅放行本地开发端口。nginx 同源反代部署不依赖 CORS。
 cors:

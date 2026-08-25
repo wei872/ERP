@@ -33,6 +33,7 @@ public class BizController {
     @Autowired private ExportService exportService;
     @Autowired private AuditService audit;
     @Autowired private BatchService batchService;
+    @Autowired private ReportMailService reportMail;
     @Autowired private FinanceTemplateService fin;
     @Autowired private ReconciliationService reconciliation;
     @Autowired private FinanceService finance;
@@ -1450,6 +1451,106 @@ public class BizController {
             if (n > 0) audit.log(user(req), "附件", "删除附件", "id=" + id, audit.getIp(req));
             return n > 0 ? Result.ok("已删除") : Result.error("附件不存在");
         } catch (Exception e) { return Result.error("删除失败: " + e.getMessage()); }
+    }
+
+    // ── 消息已读状态（按用户持久化） ──
+    @PostMapping("/message/read")
+    public Result messageRead(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        try {
+            String key = String.valueOf(body.getOrDefault("msg_key", ""));
+            if (key.isEmpty()) return Result.error("消息标识不能为空");
+            db.update("INSERT INTO sys_message_state(msg_key,username,state) VALUES(?,?,'read') ON DUPLICATE KEY UPDATE state='read'", key, user(req));
+            return Result.ok("ok");
+        } catch (Exception e) { return Result.error("标记失败: " + e.getMessage()); }
+    }
+
+    @GetMapping("/message/read-list")
+    public Result messageReadList(HttpServletRequest req) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT msg_key FROM sys_message_state WHERE username=? AND state='read'", user(req));
+            List<String> keys = new ArrayList<>();
+            for (Map<String,Object> r : rows) keys.add(String.valueOf(r.get("msg_key")));
+            return Result.ok(keys);
+        } catch (Exception e) { return Result.ok(new ArrayList<>()); }
+    }
+
+    // ── 报表邮件订阅管理 ──
+    @GetMapping("/report-subscription")
+    public Result reportSubList(HttpServletRequest req) {
+        try { return Result.ok(db.queryForList("SELECT * FROM sys_report_subscription WHERE username=? ORDER BY id DESC", user(req))); }
+        catch (Exception e) { return Result.error("订阅列表加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/report-subscription")
+    public Result reportSubSave(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        try {
+            String email = String.valueOf(body.getOrDefault("email", "")).trim();
+            String type = String.valueOf(body.getOrDefault("report_type", "daily"));
+            String freq = String.valueOf(body.getOrDefault("frequency", "daily"));
+            if (!email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) return Result.error("邮箱格式不正确");
+            if (!"daily".equals(type) && !"weekly".equals(type) && !"finance".equals(type)) return Result.error("报表类型无效");
+            db.update("INSERT INTO sys_report_subscription(username,email,report_type,frequency,enabled) VALUES(?,?,?,?,1) ON DUPLICATE KEY UPDATE email=VALUES(email), frequency=VALUES(frequency), enabled=1",
+                user(req), email, type, freq);
+            audit.log(user(req), "报表", "订阅报表", type + "->" + email, audit.getIp(req));
+            return Result.ok("订阅成功");
+        } catch (Exception e) { return Result.error("订阅失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/report-subscription/toggle/{id}")
+    public Result reportSubToggle(@PathVariable Long id, HttpServletRequest req) {
+        try {
+            int n = db.update("UPDATE sys_report_subscription SET enabled=1-enabled WHERE id=? AND username=?", id, user(req));
+            return n > 0 ? Result.ok("ok") : Result.error("订阅不存在");
+        } catch (Exception e) { return Result.error("操作失败: " + e.getMessage()); }
+    }
+
+    @DeleteMapping("/report-subscription/{id}")
+    public Result reportSubDelete(@PathVariable Long id, HttpServletRequest req) {
+        try {
+            int n = db.update("DELETE FROM sys_report_subscription WHERE id=? AND username=?", id, user(req));
+            return n > 0 ? Result.ok("已退订") : Result.error("订阅不存在");
+        } catch (Exception e) { return Result.error("退订失败: " + e.getMessage()); }
+    }
+
+    @GetMapping("/report-outbox")
+    public Result reportOutbox(HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try { return Result.ok(db.queryForList("SELECT id,subscription_id,email,subject,status,error_msg,created_at,sent_at FROM sys_report_outbox ORDER BY id DESC LIMIT 50")); }
+        catch (Exception e) { return Result.error("发件箱加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/report-outbox/send/{id}")
+    public Result reportOutboxSend(@PathVariable Long id, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String msg = reportMail.sendOutbox(id);
+            return Result.ok(msg);
+        } catch (Exception e) { return Result.error("发送失败: " + e.getMessage()); }
+    }
+
+    // ── 打印模板自定义 ──
+    @GetMapping("/print-template/{key}")
+    public Result printTemplateGet(@PathVariable String key) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT template_key,title,company_line,footer,fields_json,updated_by,updated_at FROM sys_print_template WHERE template_key=?", key);
+            if (rows.isEmpty()) return Result.ok(null);
+            return Result.ok(rows.get(0));
+        } catch (Exception e) { return Result.ok(null); }
+    }
+
+    @PostMapping("/print-template/{key}")
+    public Result printTemplateSave(@PathVariable String key, @RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String title = String.valueOf(body.getOrDefault("title", ""));
+            String companyLine = String.valueOf(body.getOrDefault("company_line", ""));
+            String footer = String.valueOf(body.getOrDefault("footer", ""));
+            String fieldsJson = body.get("fields") == null ? "[]" : new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(body.get("fields"));
+            db.update("INSERT INTO sys_print_template(template_key,title,company_line,footer,fields_json,updated_by) VALUES(?,?,?,?,?,?) ON DUPLICATE KEY UPDATE title=VALUES(title),company_line=VALUES(company_line),footer=VALUES(footer),fields_json=VALUES(fields_json),updated_by=VALUES(updated_by)",
+                key, title, companyLine, footer, fieldsJson, user(req));
+            audit.log(user(req), "打印", "保存打印模板", key, audit.getIp(req));
+            return Result.ok("模板已保存");
+        } catch (Exception e) { return Result.error("保存失败: " + e.getMessage()); }
     }
 
     // ── 销售目标达成率 ──

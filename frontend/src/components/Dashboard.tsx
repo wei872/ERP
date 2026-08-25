@@ -157,6 +157,27 @@ export default function Dashboard() {
     try { return { ...def, ...JSON.parse(localStorage.getItem('erp_dash_cfg') || '{}') }; }
     catch { return def; }
   });
+  // KPI 指标卡显隐配置（本机持久化）
+  const KPI_KEYS: Array<{ key: string; label: string }> = [
+    { key: 'sales', label: '累计销售总额' },
+    { key: 'orders', label: '累计销售单数' },
+    { key: 'customers', label: '客户总数' },
+    { key: 'production', label: '累计生产产量' },
+    { key: 'profit', label: '本年净利润' },
+  ];
+  const [dashKpi, setDashKpi] = useState<Record<string, boolean>>(() => {
+    const def: Record<string, boolean> = {};
+    KPI_KEYS.forEach(s => { def[s.key] = true; });
+    try { return { ...def, ...JSON.parse(localStorage.getItem('erp_dash_kpi') || '{}') }; }
+    catch { return def; }
+  });
+  const toggleDashKpi = (key: string) => {
+    setDashKpi(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem('erp_dash_kpi', JSON.stringify(next));
+      return next;
+    });
+  };
   const [cfgOpen, setCfgOpen] = useState(false);
   const toggleDashSection = (key: string) => {
     setDashCfg(prev => {
@@ -219,7 +240,16 @@ export default function Dashboard() {
                 {s.label}
               </label>
             ))}
-            <button onClick={() => { const def: Record<string, boolean> = {}; DASH_SECTIONS.forEach(s => { def[s.key] = true; }); setDashCfg(def); localStorage.setItem('erp_dash_cfg', JSON.stringify(def)); }} className="mt-2 w-full py-1.5 rounded-lg text-[11px] bg-slate-50 text-slate-500 hover:bg-slate-100">恢复默认</button>
+            <p className="text-[11px] text-slate-400 mt-3 mb-1 px-1 border-t border-slate-100 pt-2">KPI 指标卡</p>
+            <div className="grid grid-cols-2 gap-1">
+              {KPI_KEYS.map(s => (
+                <label key={s.key} className="flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs text-slate-600">
+                  <input type="checkbox" checked={!!dashKpi[s.key]} onChange={() => toggleDashKpi(s.key)} className="accent-indigo-600"/>
+                  {s.label}
+                </label>
+              ))}
+            </div>
+            <button onClick={() => { const def: Record<string, boolean> = {}; DASH_SECTIONS.forEach(s => { def[s.key] = true; }); setDashCfg(def); localStorage.setItem('erp_dash_cfg', JSON.stringify(def)); const kdef: Record<string, boolean> = {}; KPI_KEYS.forEach(s => { kdef[s.key] = true; }); setDashKpi(kdef); localStorage.setItem('erp_dash_kpi', JSON.stringify(kdef)); }} className="mt-2 w-full py-1.5 rounded-lg text-[11px] bg-slate-50 text-slate-500 hover:bg-slate-100">恢复默认</button>
           </div>
         </>)}
       </div>
@@ -268,11 +298,11 @@ export default function Dashboard() {
 
       {/* KPI Stat Cards */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600" sub={`本月新增 ¥${fmt(curMonthSales)}`} onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_sales_main' } }))}/>
-        <StatCard icon="📦" label="累计销售单数" value={n2v(stats.totalOrders?.value).toLocaleString()} gradient="from-indigo-400 to-indigo-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_sales_main' } }))}/>
-        <StatCard icon="👥" label="客户总数" value={n2v(stats.totalCustomers?.value).toLocaleString()} gradient="from-emerald-400 to-emerald-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'cust_customer_main' } }))}/>
-        <StatCard icon="🏗️" label="累计生产产量" value={`${fmt(n2v(stats.productionOutput?.value))}件`} gradient="from-orange-400 to-orange-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'prod_work_order' } }))}/>
-        <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600" sub="4104 本年利润结转" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'account_subject_balance' } }))}/>
+        {dashKpi.sales && <StatCard icon="💰" label="累计销售总额" value={`¥${fmt(n2v(stats.totalSales?.value))}`} gradient="from-blue-400 to-blue-600" sub={`本月新增 ¥${fmt(curMonthSales)}`} onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_sales_main' } }))}/>}
+        {dashKpi.orders && <StatCard icon="📦" label="累计销售单数" value={n2v(stats.totalOrders?.value).toLocaleString()} gradient="from-indigo-400 to-indigo-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_sales_main' } }))}/>}
+        {dashKpi.customers && <StatCard icon="👥" label="客户总数" value={n2v(stats.totalCustomers?.value).toLocaleString()} gradient="from-emerald-400 to-emerald-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'cust_customer_main' } }))}/>}
+        {dashKpi.production && <StatCard icon="🏗️" label="累计生产产量" value={`${fmt(n2v(stats.productionOutput?.value))}件`} gradient="from-orange-400 to-orange-600" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'prod_work_order' } }))}/>}
+        {dashKpi.profit && <StatCard icon="📈" label="本年净利润" value={`¥${fmt(n2v(stats.netProfit?.value))}`} gradient="from-teal-400 to-teal-600" sub="4104 本年利润结转" onClick={() => window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'account_subject_balance' } }))}/>}
       </div>
 
       {/* Charts Row 1 */}

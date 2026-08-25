@@ -1,5 +1,6 @@
 import { toastNotify } from '../utils/toast';
 import { getCurrentCompanyName } from '../utils/company';
+import PrintTemplateDesigner, { STATEMENT_FIELDS } from './PrintTemplateDesigner';
 import { useCallback, useEffect, useState } from 'react';
 import { bizApi, dataApi } from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -24,8 +25,15 @@ export default function ReconciliationPage() {
   // 核销 modal
   const [active, setActive] = useState<Row | null>(null);
   const [amount, setAmount] = useState(0);
-  // 对账单打印（客户应收 / 供应商应付 双向）
+  // 对账单打印（客户应收 / 供应商应付 双向）+ 打印模板
   const [statement, setStatement] = useState<{ kind: 'receivable' | 'payable'; party: string; items: Row[] } | null>(null);
+  const [designerOpen, setDesignerOpen] = useState(false);
+  const [printTpl, setPrintTpl] = useState<any>(null);
+
+  const loadPrintTpl = useCallback(() => {
+    bizApi.printTemplateGet('statement').then(r => setPrintTpl(r.data)).catch(() => setPrintTpl(null));
+  }, []);
+  useEffect(() => { loadPrintTpl(); }, [loadPrintTpl]);
 
   const doPrintStatement = async () => {
     const isRcv = tab === 'receivable';
@@ -133,7 +141,11 @@ export default function ReconciliationPage() {
         </div>
         <button onClick={load} disabled={loading} className="px-4 py-2 bg-white border rounded-lg text-sm">↻ 刷新</button>
         <button onClick={doPrintStatement} title={tab === 'receivable' ? '按客户打印应收对账单' : '按供应商打印应付对账单'} className="px-4 py-2 bg-slate-800 text-white rounded-lg text-sm hover:bg-slate-700">🖨️ 打印对账单</button>
+        <button onClick={() => setDesignerOpen(true)} title="自定义对账单打印模板" className="px-3 py-2 bg-white border rounded-lg text-sm hover:border-indigo-300 hover:text-indigo-600">⚙️ 模板</button>
       </div>
+
+      {/* 打印模板设计器 */}
+      {designerOpen && <PrintTemplateDesigner onClose={() => setDesignerOpen(false)} onSaved={loadPrintTpl} />}
 
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-blue-50 p-4 rounded-lg"><div className="text-xs text-blue-400">单据总额</div><div className="text-xl font-bold text-blue-700">¥{fmt(totalAmt)}</div></div>
@@ -258,7 +270,7 @@ export default function ReconciliationPage() {
         </div>
       )}
 
-      {/* 对账单打印弹窗（客户应收 / 供应商应付） */}
+      {/* 对账单打印弹窗（客户应收 / 供应商应付，应用打印模板） */}
       {statement && (() => {
         const isRcv = statement.kind === 'receivable';
         const paidField = isRcv ? 'received_amount' : 'paid_amount';
@@ -266,6 +278,30 @@ export default function ReconciliationPage() {
         const total = statement.items.reduce((s, r) => s + (Number(r.total_amount) || 0), 0);
         const received = statement.items.reduce((s, r) => s + (Number((r as any)[paidField]) || 0), 0);
         const remain = statement.items.reduce((s, r) => s + (Number(r.remain_amount) || 0), 0);
+        // 模板应用：标题 / 抬头 / 落款 / 可见列
+        const tplTitle = printTpl?.title ? String(printTpl.title).replace('客 户', isRcv ? '客 户' : '供 应 商').replace('客户', isRcv ? '客户' : '供应商') : (isRcv ? '客 户 对 账 单' : '供 应 商 对 账 单');
+        const companyLine = printTpl?.company_line ? String(printTpl.company_line) : getCurrentCompanyName();
+        const footerText = printTpl?.footer != null && String(printTpl.footer) !== '' ? String(printTpl.footer) : (isRcv
+          ? `截至打印日，贵司未结清余额为 ¥${fmt(remain)}。如有异议请于 7 个工作日内与我司财务部联系核对。`
+          : `截至打印日，我司对贵司未结清应付余额为 ¥${fmt(remain)}。如有异议请于 7 个工作日内与我司财务部联系核对。`);
+        let tplFields: string[] = STATEMENT_FIELDS.map(x => x.key);
+        try { const f = JSON.parse(printTpl?.fields_json || '[]'); if (Array.isArray(f) && f.length > 0) tplFields = f; } catch { /* 默认 */ }
+        const colDefs = STATEMENT_FIELDS.filter(f => tplFields.includes(f.key)).map(f => {
+          let label = f.label;
+          if (!isRcv) label = label.replace('应收单号', '应付单号').replace('应收金额', '应付金额').replace('已收款', '已付款').replace('未收余额', '未付余额');
+          return { key: f.key, label };
+        });
+        const cellVal = (r: any, key: string) => {
+          if (key === 'receivable_no') return String((r as any)[noField] || '');
+          if (key === 'created_at') return String(r.created_at || '').slice(0, 10);
+          if (key === 'due_date') return String(r.due_date || '').slice(0, 10);
+          if (key === 'total_amount') return fmt(r.total_amount);
+          if (key === 'received_amount') return fmt((r as any)[paidField]);
+          if (key === 'remain_amount') return fmt(r.remain_amount);
+          if (key === 'status') return String(r.status || '');
+          return '';
+        };
+        const isMoneyCol = (key: string) => key === 'total_amount' || key === 'received_amount' || key === 'remain_amount';
         return (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[95] p-4" onClick={() => setStatement(null)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -278,8 +314,8 @@ export default function ReconciliationPage() {
               </div>
               <div className="p-8 overflow-y-auto flex-1 print-area">
                 <div className="text-center mb-6">
-                  <p className="text-sm font-semibold text-slate-700 tracking-widest">{getCurrentCompanyName()}</p>
-                  <h1 className="text-xl font-bold tracking-[0.3em] text-slate-800 mt-1">{isRcv ? '客 户 对 账 单' : '供 应 商 对 账 单'}</h1>
+                  <p className="text-sm font-semibold text-slate-700 tracking-widest">{companyLine}</p>
+                  <h1 className="text-xl font-bold tracking-[0.3em] text-slate-800 mt-1">{tplTitle}</h1>
                   <p className="text-[11px] text-slate-400 mt-1">打印时间：{new Date().toLocaleString('zh-CN')}</p>
                 </div>
                 <div className="flex justify-between text-xs text-slate-600 mb-3">
@@ -289,41 +325,27 @@ export default function ReconciliationPage() {
                 <table className="w-full text-xs border-collapse mb-4">
                   <thead>
                     <tr className="bg-slate-50">
-                      <th className="border border-slate-300 px-2 py-1.5">{isRcv ? '应收单号' : '应付单号'}</th>
-                      <th className="border border-slate-300 px-2 py-1.5">日期</th>
-                      <th className="border border-slate-300 px-2 py-1.5">到期日</th>
-                      <th className="border border-slate-300 px-2 py-1.5 text-right">{isRcv ? '应收金额' : '应付金额'}</th>
-                      <th className="border border-slate-300 px-2 py-1.5 text-right">{isRcv ? '已收款' : '已付款'}</th>
-                      <th className="border border-slate-300 px-2 py-1.5 text-right">{isRcv ? '未收余额' : '未付余额'}</th>
-                      <th className="border border-slate-300 px-2 py-1.5">状态</th>
+                      {colDefs.map(c => <th key={c.key} className={`border border-slate-300 px-2 py-1.5 ${isMoneyCol(c.key) ? 'text-right' : ''}`}>{c.label}</th>)}
                     </tr>
                   </thead>
                   <tbody>
                     {statement.items.map((r, i) => (
                       <tr key={i}>
-                        <td className="border border-slate-300 px-2 py-1.5 font-mono">{String((r as any)[noField])}</td>
-                        <td className="border border-slate-300 px-2 py-1.5">{String(r.created_at || '').slice(0, 10)}</td>
-                        <td className="border border-slate-300 px-2 py-1.5">{String(r.due_date || '').slice(0, 10)}</td>
-                        <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums">{fmt(r.total_amount)}</td>
-                        <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums">{fmt((r as any)[paidField])}</td>
-                        <td className="border border-slate-300 px-2 py-1.5 text-right tabular-nums font-medium">{fmt(r.remain_amount)}</td>
-                        <td className="border border-slate-300 px-2 py-1.5">{String(r.status)}</td>
+                        {colDefs.map(c => <td key={c.key} className={`border border-slate-300 px-2 py-1.5 ${isMoneyCol(c.key) ? 'text-right tabular-nums' : c.key === 'receivable_no' ? 'font-mono' : ''}`}>{cellVal(r, c.key)}</td>)}
                       </tr>
                     ))}
                     <tr className="bg-slate-50 font-bold">
-                      <td className="border border-slate-300 px-2 py-2 text-center" colSpan={3}>合计</td>
-                      <td className="border border-slate-300 px-2 py-2 text-right tabular-nums">¥{fmt(total)}</td>
-                      <td className="border border-slate-300 px-2 py-2 text-right tabular-nums">¥{fmt(received)}</td>
-                      <td className="border border-slate-300 px-2 py-2 text-right tabular-nums">¥{fmt(remain)}</td>
-                      <td className="border border-slate-300 px-2 py-2"></td>
+                      {colDefs.map(c => (
+                        <td key={c.key} className={`border border-slate-300 px-2 py-2 ${isMoneyCol(c.key) ? 'text-right tabular-nums' : 'text-center'}`}>
+                          {c.key === 'total_amount' ? `¥${fmt(total)}` : c.key === 'received_amount' ? `¥${fmt(received)}` : c.key === 'remain_amount' ? `¥${fmt(remain)}` : colDefs.indexOf(c) === 0 ? '合计' : ''}
+                        </td>
+                      ))}
                     </tr>
                   </tbody>
                 </table>
-                <p className="text-xs text-slate-500 mb-8">{isRcv
-                  ? <>截至打印日，贵司未结清余额为 <b className="text-slate-800">¥{fmt(remain)}</b>。如有异议请于 7 个工作日内与我司财务部联系核对。</>
-                  : <>截至打印日，我司对贵司未结清应付余额为 <b className="text-slate-800">¥{fmt(remain)}</b>。如有异议请于 7 个工作日内与我司财务部联系核对。</>}</p>
+                <p className="text-xs text-slate-500 mb-8">{footerText}</p>
                 <div className="grid grid-cols-2 gap-8 text-xs text-slate-500">
-                  <div>{isRcv ? '供方' : '需方'}（盖章）：{getCurrentCompanyName()}<br/><br/>经办人：__________</div>
+                  <div>{isRcv ? '供方' : '需方'}（盖章）：{companyLine}<br/><br/>经办人：__________</div>
                   <div>{isRcv ? '客方' : '供方'}（确认）：{statement.party}<br/><br/>经办人：__________</div>
                 </div>
               </div>
