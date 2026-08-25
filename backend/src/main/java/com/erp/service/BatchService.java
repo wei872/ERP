@@ -48,7 +48,13 @@ public class BatchService {
     public void createProductionBatch(String workOrderNo, String productCode, String productName, BigDecimal qty, BigDecimal unitCost) {
         String batchNo = "MB-" + workOrderNo;
         List<String> consumed = new ArrayList<>();
+        // 优先取领料环节已耗用的批次（领料确认时已 FIFO 耗用），避免重复扣减
         try {
+            List<Map<String,Object>> consumedRows = db.queryForList(
+                "SELECT DISTINCT batch_no FROM trade_batch_consume WHERE target_no=? AND target_type='生产领料'", workOrderNo);
+            for (Map<String,Object> r : consumedRows) consumed.add(String.valueOf(r.get("batch_no")));
+        } catch (Exception ignored) {}
+        if (consumed.isEmpty()) try {
             List<Map<String,Object>> bom;
             try {
                 bom = db.queryForList("SELECT * FROM prod_bom_structure WHERE parent_code=? OR (parent_code IS NULL AND product_code=?)", productCode, productCode);
@@ -76,7 +82,9 @@ public class BatchService {
 
     /** 销售出库按行耗用：FIFO 消耗批次并返回该行先进先出成本（批次无成本数据时返回 0，由调用方回退加权平均） */
     @Transactional
-    public BigDecimal consumeLineForSale(String productCode, BigDecimal qty, String salesNo) {
+    /** 按行 FIFO 耗用批次（通用：销售出库/生产领料），返回先进先出成本（批次无成本数据时返回 0） */
+    @Transactional
+    public BigDecimal consumeLineForTarget(String productCode, BigDecimal qty, String targetNo, String targetType) {
         BigDecimal totalCost = BigDecimal.ZERO;
         boolean hasCost = false;
         if (qty == null || qty.signum() <= 0) return BigDecimal.ZERO;
@@ -94,10 +102,15 @@ public class BatchService {
             db.update("UPDATE trade_batch_trace SET remain_qty=?, status=? WHERE batch_no=?",
                 after, after.signum() == 0 ? "已耗用" : "在库", bn);
             db.update("INSERT INTO trade_batch_consume(batch_no,product_code,consume_qty,target_no,target_type,consume_date) VALUES(?,?,?,?,?,CURDATE())",
-                bn, productCode, take, salesNo, "销售出库");
+                bn, productCode, take, targetNo, targetType);
             need = need.subtract(take);
         }
         return hasCost ? totalCost : BigDecimal.ZERO;
+    }
+
+    /** 销售出库按行 FIFO 耗用，返回先进先出成本（批次无成本数据时返回 0，调用方回退加权平均） */
+    public BigDecimal consumeLineForSale(String productCode, BigDecimal qty, String salesNo) {
+        return consumeLineForTarget(productCode, qty, salesNo, "销售出库");
     }
 
     public void consumeForSale(String salesNo) {

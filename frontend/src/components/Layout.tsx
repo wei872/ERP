@@ -131,6 +131,8 @@ export default function Layout() {
   const todoTotal = todos ? n(todos.pendingApprovals) + n(todos.lowStock?.count) + n(todos.overdueReceivable?.count) + n(todos.overduePayable?.count) + n(todos.pendingUsers) : 0;
   const todoJump = (p: Page) => { go(p); setTodoOpen(false); };
 
+  // ── 移动端全局搜索（全屏层） ──
+  const [mobileSearch, setMobileSearch] = useState(false);
   // ── 多公司（账套）上下文切换 ──
   const [companies, setCompanies] = useState<any[]>([]);
   const [curCompany, setCurCompany] = useState<CompanyInfo>(getCurrentCompany());
@@ -261,6 +263,7 @@ export default function Layout() {
       <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/80 px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between shrink-0 gap-2" style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
         <div className="flex items-center gap-2 min-w-0">
           {isMobile && <button onClick={() => setMobileNav(true)} title="打开菜单" className="p-2 -ml-1 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors shrink-0"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16"/></svg></button>}
+          {isMobile && <button onClick={() => setMobileSearch(true)} title="全局搜索" className="p-2 -ml-1 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors shrink-0"><svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg></button>}
           <h2 className="text-[15px] font-semibold text-slate-800 truncate tracking-tight">{getPageTitle()}</h2>
         </div>
         {/* 全局搜索：功能页 + 162 张数据表即搜即达 */}
@@ -307,7 +310,7 @@ export default function Layout() {
             </button>
             {todoOpen && (<>
               <div className="fixed inset-0 z-40" onClick={() => setTodoOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 overflow-hidden erp-fade-in">
+              <div className="absolute right-0 top-full mt-2 w-80 max-w-[92vw] bg-white rounded-2xl border border-slate-200 shadow-2xl z-50 overflow-hidden erp-fade-in">
                 <div className="px-4 py-3 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex items-center justify-between">
                   <span className="text-sm font-semibold">🔔 待办中心</span>
                   <span className="text-[11px] text-indigo-200">{todoTotal} 项待处理</span>
@@ -402,6 +405,38 @@ export default function Layout() {
         </Suspense>
       </main>
       {bigScreen && <Suspense fallback={null}><BigScreen onExit={() => setBigScreen(false)} /></Suspense>}
+
+      {/* 移动端全局搜索全屏层 */}
+      {mobileSearch && (
+        <div className="fixed inset-0 z-[140] bg-slate-900/60 backdrop-blur-sm md:hidden" onClick={() => setMobileSearch(false)}>
+          <div className="bg-white w-full h-full flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-100 flex gap-2 items-center shrink-0">
+              <input autoFocus value={gq} onChange={e => setGq(e.target.value)} placeholder="搜索功能页 / 数据表…"
+                className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-sm outline-none focus:border-indigo-400 focus:bg-white"/>
+              <button onClick={() => { setMobileSearch(false); setGq(''); }} className="text-sm text-slate-500 px-2 shrink-0">取消</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-1">
+              {gq.trim() === '' ? (
+                <p className="text-center text-xs text-slate-400 py-12">输入表名 / 功能名试试，例如：销售单 / 凭证 / 盘点</p>
+              ) : (<>
+                {gResults.pages.length === 0 && gResults.tables.length === 0 && <p className="text-center text-xs text-slate-400 py-12">未找到匹配项</p>}
+                {gResults.pages.map(p => (
+                  <button key={p.label} onClick={() => { jump(p.page); setMobileSearch(false); }} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left text-sm text-slate-700 hover:bg-indigo-50 active:bg-indigo-100">
+                    <span>{p.icon}</span><span className="font-medium">{p.label}</span><span className="ml-auto text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">功能页</span>
+                  </button>
+                ))}
+                {gResults.tables.map(t => (
+                  <button key={t.table} onClick={() => { jump({ type: 'table', tableKey: t.table }); setMobileSearch(false); }} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left text-sm text-slate-700 hover:bg-indigo-50 active:bg-indigo-100">
+                    <span className="min-w-0 truncate">{t.cnName}</span>
+                    <span className="font-mono text-[10px] text-slate-400 shrink-0">{t.table}</span>
+                    <span className="ml-auto text-[10px] text-slate-400 truncate max-w-[90px] shrink-0">{t.sub}</span>
+                  </button>
+                ))}
+              </>)}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   </div>);
 }

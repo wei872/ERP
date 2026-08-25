@@ -78,8 +78,8 @@ public class WorkflowService {
                 if (amt.signum() > 0) {
                     String vn = "VZ-EXP-" + System.currentTimeMillis();
                     String period = new SimpleDateFormat("yyyy-MM").format(new Date());
-                    db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
-                        vn, period, amt, amt, "费用审批通过自动凭证:" + approvalNo);
+                    db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+                        vn, period, amt, amt, "费用审批通过自动凭证:" + approvalNo, com.erp.config.CompanyContext.get());
                     db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'6602','管理费用',?,0,?)",
                         vn, amt, "费用报销-" + approvalNo);
                     db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1002','银行存款',0,?,?)",

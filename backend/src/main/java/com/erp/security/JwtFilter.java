@@ -25,7 +25,13 @@ public class JwtFilter extends OncePerRequestFilter {
                 req.setAttribute("uid", jwtUtil.getUserId(t));
                 req.setAttribute("user", jwtUtil.getUsername(t));
                 req.setAttribute("role", jwtUtil.getRole(t));
-                chain.doFilter(req, res);
+                // 公司（账套）上下文：前端全局携带，未携带默认 HQ
+                com.erp.config.CompanyContext.set(req.getHeader("X-Company-Code"));
+                try {
+                    chain.doFilter(req, res);
+                } finally {
+                    com.erp.config.CompanyContext.clear();
+                }
                 return;
             }
         }

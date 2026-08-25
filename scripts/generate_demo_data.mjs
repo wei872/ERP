@@ -541,6 +541,18 @@ insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model',
     contracts.map(c => [q(c[0]), q(c[1]), q(c[2]), q(c[3]), money(c[4]), dAgo(c[5]), dAgo(c[6]), c[7], q(c[8]), q(c[9]), q('')]));
 }
 
+// ── 销售退货单（已出库销售的部分退货样例） ──
+{
+  const shipped = sales.filter(s => s.ship === '已出库');
+  const retRows = shipped.slice(0, 2).map((s, i) => {
+    const line = s.lines[0];
+    const qty = Math.max(1, Math.floor(line.qty / 4));
+    const reason = i === 0 ? '外观瑕疵退货' : '客户订单变更退货';
+    return [q(`SR-D-00${i + 1}`), q(s.no), q(customers[s.custIdx][0]), q(customers[s.custIdx][1]), dAgo(s.m * 30 + 2), q(reason), money(qty * line.price), q('李四'), q('已入库'), q(`退货:${line.code} x${qty}`)];
+  });
+  insert('trade_sales_return', ['return_no', 'ref_sales_no', 'customer_code', 'customer_name', 'return_date', 'return_reason', 'total_amount', 'handler', 'status', 'remark'], retRows);
+}
+
 // ── 仓库主数据（多仓库管理） ──
 insert('trade_warehouse_main', ['warehouse_code', 'warehouse_name', 'warehouse_type', 'manager', 'location', 'status', 'remark'], [
   [q('WH-01'), q(WH_RAW), q('原料仓'), q('李四'), q('A区-1层'), q('启用'), q('原材料/元器件存储，采购入库与生产领料')],

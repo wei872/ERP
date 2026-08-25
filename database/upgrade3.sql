@@ -226,7 +226,18 @@ INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_
 ('doc.status','已转订单','已转订单','green',44);
 
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
-('prod_quotation','audit_status','doc.status');
+('prod_quotation','audit_status','doc.status'),
+('trade_sales_return','status','doc.status');
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('trade_sales_return','销售退货单','进销存管理','销售管理',914);
+
+-- ── 总账按公司隔离：科目余额增加公司维度 ──
+SET @c12 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='account_subject_balance' AND column_name='company_code');
+SET @s12 = IF(@c12=0, "ALTER TABLE account_subject_balance ADD COLUMN company_code VARCHAR(50) DEFAULT 'HQ' COMMENT '公司编码（账套）'", 'SELECT 1'); PREPARE st12 FROM @s12; EXECUTE st12; DEALLOCATE PREPARE st12;
+UPDATE account_subject_balance SET company_code='HQ' WHERE company_code IS NULL;
+SET @i2 = (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='account_subject_balance' AND index_name='idx_asb_company');
+SET @si2 = IF(@i2=0, 'CREATE INDEX idx_asb_company ON account_subject_balance(company_code, period, subject_code)', 'SELECT 1'); PREPARE sti2 FROM @si2; EXECUTE sti2; DEALLOCATE PREPARE sti2;
 
 -- 批次/编码规则表注册进通用菜单与字典
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES

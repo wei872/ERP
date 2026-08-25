@@ -69,7 +69,7 @@ public class ReportService {
         stats.put("totalCustomers", stat(count("SELECT COUNT(*) FROM cust_customer_main")));
         stats.put("totalPurchase", stat(sum("SELECT COALESCE(SUM(total_amount),0) FROM trade_purchase_main")));
         stats.put("productionOutput", stat(sum("SELECT COALESCE(SUM(actual_qty),0) FROM prod_work_order")));
-        stats.put("netProfit", stat(sum("SELECT COALESCE(MAX(end_balance),0) FROM account_subject_balance WHERE subject_code='4104'")));
+        stats.put("netProfit", stat(sum("SELECT COALESCE(MAX(end_balance),0) FROM account_subject_balance WHERE subject_code='4104' AND COALESCE(company_code,'HQ')=?", new Object[]{com.erp.config.CompanyContext.get()})));
         stats.put("totalEmployees", stat(sum("SELECT COUNT(*) FROM hr_employee_main")));
         Long tblCount = count("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA=DATABASE()");
         stats.put("totalTables", stat(tblCount));
@@ -87,7 +87,7 @@ public class ReportService {
         kpi.put("totalSales", sum("SELECT COALESCE(SUM(total_amount),0) FROM trade_sales_main"));
         kpi.put("totalPurchase", sum("SELECT COALESCE(SUM(total_amount),0) FROM trade_purchase_main"));
         kpi.put("inventoryValue", sum("SELECT COALESCE(SUM(total_value),0) FROM trade_inventory_balance"));
-        kpi.put("netProfit", sum("SELECT COALESCE(MAX(end_balance),0) FROM account_subject_balance WHERE subject_code='4104'"));
+        kpi.put("netProfit", sum("SELECT COALESCE(MAX(end_balance),0) FROM account_subject_balance WHERE subject_code='4104' AND COALESCE(company_code,'HQ')=?", new Object[]{com.erp.config.CompanyContext.get()}));
         kpi.put("production", sum("SELECT COALESCE(SUM(actual_qty),0) FROM prod_work_order"));
         kpi.put("employees", count("SELECT COUNT(*) FROM hr_employee_main"));
         return kpi;
@@ -156,7 +156,7 @@ public class ReportService {
     /** 资产负债表：按会计科目前4位分类汇总 */
     public Map<String,Object> balanceSheet(String period) {
         Map<String,Object> ret = new LinkedHashMap<>();
-        List<Map<String,Object>> subjects = db.queryForList("SELECT subject_code, subject_name, end_balance FROM account_subject_balance WHERE period=? ORDER BY subject_code", period);
+        List<Map<String,Object>> subjects = db.queryForList("SELECT subject_code, subject_name, end_balance FROM account_subject_balance WHERE period=? AND COALESCE(company_code,'HQ')=? ORDER BY subject_code", period, com.erp.config.CompanyContext.get());
         BigDecimal assets = BigDecimal.ZERO, liabilities = BigDecimal.ZERO, equity = BigDecimal.ZERO;
         List<Map<String,Object>> assetItems = new ArrayList<>(), liabilityItems = new ArrayList<>(), equityItems = new ArrayList<>();
         for (Map<String,Object> r : subjects) {
@@ -179,9 +179,9 @@ public class ReportService {
     /** 利润表：按损益类科目（6开头）汇总 */
     public Map<String,Object> incomeStatement(String period) {
         Map<String,Object> ret = new LinkedHashMap<>();
-        BigDecimal revenue = sum("SELECT COALESCE(SUM(credit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%'", period);
-        BigDecimal expense = sum("SELECT COALESCE(SUM(debit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%'", period);
-        BigDecimal cost = sum("SELECT COALESCE(SUM(end_balance),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND end_balance<0", period);
+        BigDecimal revenue = sum("SELECT COALESCE(SUM(credit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND COALESCE(company_code,'HQ')=?", new Object[]{period, com.erp.config.CompanyContext.get()});
+        BigDecimal expense = sum("SELECT COALESCE(SUM(debit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND COALESCE(company_code,'HQ')=?", new Object[]{period, com.erp.config.CompanyContext.get()});
+        BigDecimal cost = sum("SELECT COALESCE(SUM(end_balance),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND end_balance<0 AND COALESCE(company_code,'HQ')=?", new Object[]{period, com.erp.config.CompanyContext.get()});
         if (cost == null) cost = BigDecimal.ZERO;
         BigDecimal grossProfit = revenue.subtract(cost.abs()).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
         BigDecimal netProfit = revenue.subtract(expense).setScale(2, RoundingMode.HALF_UP);
@@ -191,7 +191,7 @@ public class ReportService {
         ret.put("gross_profit", grossProfit);
         ret.put("expense", expense.setScale(2, RoundingMode.HALF_UP));
         ret.put("net_profit", netProfit);
-        ret.put("items", db.queryForList("SELECT subject_code, subject_name, debit_amount, credit_amount, end_balance FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' ORDER BY subject_code", period));
+        ret.put("items", db.queryForList("SELECT subject_code, subject_name, debit_amount, credit_amount, end_balance FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND COALESCE(company_code,'HQ')=? ORDER BY subject_code", period, com.erp.config.CompanyContext.get()));
         return ret;
     }
     /** 现金流量表：按收支流水表汇总 */
@@ -369,6 +369,10 @@ public class ReportService {
     }
     private BigDecimal sum(String sql, String param) {
         try { return db.queryForObject(sql, BigDecimal.class, param); }
+        catch (Exception e) { return BigDecimal.ZERO; }
+    }
+    private BigDecimal sum(String sql, Object[] params) {
+        try { return db.queryForObject(sql, BigDecimal.class, params); }
         catch (Exception e) { return BigDecimal.ZERO; }
     }
     private BigDecimal sum(String sql) {

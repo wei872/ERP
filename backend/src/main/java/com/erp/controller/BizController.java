@@ -626,6 +626,88 @@ public class BizController {
         } catch (Exception e) { return Result.error("转换失败: " + e.getMessage()); }
     }
 
+    // ── 销售退货：退货单 + 回库 + 红字凭证（收入/成本冲回）+ 应收冲减 ──
+    @PostMapping("/sales-return")
+    @Transactional
+    public Result salesReturn(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req)) && !"aftersale".equals(role(req))) return Result.error("权限不足");
+        try {
+            String salesNo = String.valueOf(body.getOrDefault("ref_sales_no", ""));
+            if (salesNo.isEmpty()) return Result.error("请提供原销售单号");
+            List<Map<String,Object>> sales = db.queryForList("SELECT * FROM trade_sales_main WHERE sales_no=?", salesNo);
+            if (sales.isEmpty()) return Result.error("销售单不存在: " + salesNo);
+            List<Map<String,Object>> details = db.queryForList("SELECT * FROM trade_sales_detail WHERE sales_no=? ORDER BY line_no", salesNo);
+            if (details.isEmpty()) return Result.error("销售单无明细行");
+            String reqCode = body.get("product_code") == null ? "" : String.valueOf(body.get("product_code"));
+            Map<String,Object> line = null;
+            for (Map<String,Object> d : details) {
+                if (reqCode.isEmpty() || reqCode.equals(String.valueOf(d.get("product_code")))) { line = d; break; }
+            }
+            if (line == null) return Result.error("销售单中无该商品: " + reqCode);
+            java.math.BigDecimal maxQty = new java.math.BigDecimal(String.valueOf(line.getOrDefault("qty", "0")));
+            java.math.BigDecimal qty = body.get("qty") == null || String.valueOf(body.get("qty")).isEmpty()
+                ? maxQty : new java.math.BigDecimal(String.valueOf(body.get("qty")));
+            if (qty.signum() <= 0 || qty.compareTo(maxQty) > 0) return Result.error("退货数量须在 1 ~ " + maxQty.stripTrailingZeros().toPlainString() + " 之间");
+            java.math.BigDecimal price = new java.math.BigDecimal(String.valueOf(line.getOrDefault("unit_price", "0")));
+            java.math.BigDecimal amount = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
+            String pCode = String.valueOf(line.get("product_code"));
+            String pName = String.valueOf(line.getOrDefault("product_name", pCode));
+            String spec = String.valueOf(line.getOrDefault("spec_model", ""));
+            String warehouse = sales.get(0).get("warehouse") != null && !String.valueOf(sales.get(0).get("warehouse")).isEmpty()
+                ? String.valueOf(sales.get(0).get("warehouse")) : "默认仓";
+
+            // 1) 退货单
+            String retNo = "SR-" + System.currentTimeMillis();
+            db.update("INSERT INTO trade_sales_return(return_no,ref_sales_no,customer_code,customer_name,return_date,return_reason,total_amount,handler,status,remark) VALUES(?,?,?,?,CURDATE(),?,?,?,'已入库',?)",
+                retNo, salesNo, sales.get(0).getOrDefault("customer_code", ""), sales.get(0).getOrDefault("customer_name", ""),
+                String.valueOf(body.getOrDefault("reason", "销售退货")), amount, user(req), "退货:" + pCode + " x" + qty.stripTrailingZeros().toPlainString());
+
+            // 2) 回库（按当前库存加权成本；无库存记录则成本 0）
+            java.math.BigDecimal unitCost = java.math.BigDecimal.ZERO;
+            try {
+                List<Map<String,Object>> bal = db.queryForList("SELECT unit_cost FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", pCode, warehouse);
+                if (!bal.isEmpty() && bal.get(0).get("unit_cost") != null) unitCost = new java.math.BigDecimal(bal.get(0).get("unit_cost").toString());
+            } catch (Exception ignored) {}
+            inventory.stockIn(pCode, pName, spec, warehouse, "", qty, unitCost, retNo);
+
+            // 3) 红字凭证：冲收入（借 6001 贷 1122）+ 冲成本（借 1405 贷 6401）
+            String period = new java.text.SimpleDateFormat("yyyy-MM").format(new java.util.Date());
+            String cc = com.erp.config.CompanyContext.get();
+            String vn1 = "VZ-SR-" + System.currentTimeMillis();
+            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+                vn1, period, amount, amount, "销售退货红字(冲收入):" + retNo, cc);
+            db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'6001','主营业务收入',?,0,?)", vn1, amount, "退货冲收入-" + salesNo);
+            db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1122','应收账款',0,?,?)", vn1, amount, "退货冲应收-" + salesNo);
+            finance.updateBalance("6001", "主营业务收入", amount, java.math.BigDecimal.ZERO);
+            finance.updateBalance("1122", "应收账款", java.math.BigDecimal.ZERO, amount);
+            java.math.BigDecimal costAmount = qty.multiply(unitCost).setScale(2, java.math.RoundingMode.HALF_UP);
+            if (costAmount.signum() > 0) {
+                String vn2 = vn1 + "-C";
+                db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+                    vn2, period, costAmount, costAmount, "销售退货红字(冲成本):" + retNo, cc);
+                db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'1405','库存商品',?,0,?)", vn2, costAmount, "退货回库-" + salesNo);
+                db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'6401','主营业务成本',0,?,?)", vn2, costAmount, "退货冲成本-" + salesNo);
+                finance.updateBalance("1405", "库存商品", costAmount, java.math.BigDecimal.ZERO);
+                finance.updateBalance("6401", "主营业务成本", java.math.BigDecimal.ZERO, costAmount);
+            }
+
+            // 4) 应收冲减
+            try {
+                db.update("UPDATE finance_receivable_main SET total_amount=GREATEST(0,total_amount-?), remain_amount=GREATEST(0,remain_amount-?) WHERE remark LIKE ?",
+                    amount, amount, "%" + salesNo + "%");
+            } catch (Exception ignored) {}
+
+            audit.log(user(req), "销售", "销售退货", salesNo + "→" + retNo + " ¥" + amount, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("return_no", retNo);
+            ret.put("sales_no", salesNo);
+            ret.put("amount", amount);
+            ret.put("cost_amount", costAmount);
+            ret.put("voucher_no", vn1);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("退货失败: " + e.getMessage()); }
+    }
+
     // ── 库存盘点：查账面 → 录实盘 → 自动调账 ──
     @GetMapping("/stock-check/query") public Result stockCheckQuery(@RequestParam String product_code, @RequestParam String warehouse) {
         try {

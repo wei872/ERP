@@ -23,12 +23,12 @@ public class ClosingService {
         // 1. 收入类科目（6开头，6开头会计科目一般是损益类，本系统约定 6xxx = 损益）
         List<Map<String,Object>> incomeRows = db.queryForList(
             "SELECT subject_code, subject_name, end_balance FROM account_subject_balance " +
-            "WHERE period=? AND subject_code LIKE '6%' AND subject_code NOT IN ('6601','6701') AND credit_amount > 0 ORDER BY subject_code", period);
+            "WHERE period=? AND subject_code LIKE '6%' AND subject_code NOT IN ('6601','6701') AND credit_amount > 0 AND COALESCE(company_code,'HQ')=? ORDER BY subject_code", period, com.erp.config.CompanyContext.get());
 
         // 2. 费用类科目（subject_code 6601/6701/营业成本/销售费用/管理费用等借方科目；为简化，这里取 6 开头且 debit_amount > 0）
         List<Map<String,Object>> expenseRows = db.queryForList(
             "SELECT subject_code, subject_name, end_balance FROM account_subject_balance " +
-            "WHERE period=? AND subject_code LIKE '6%' AND debit_amount > 0 ORDER BY subject_code", period);
+            "WHERE period=? AND subject_code LIKE '6%' AND debit_amount > 0 AND COALESCE(company_code,'HQ')=? ORDER BY subject_code", period, com.erp.config.CompanyContext.get());
 
         if (incomeRows.isEmpty() && expenseRows.isEmpty()) {
             db.update("INSERT INTO sys_month_end_op(op_code,month_period,month_end_date,month_end_status,operator,remark) VALUES(?,?,DATE_ADD(?,INTERVAL 1 MONTH),'已完成','系统',?)",
@@ -51,8 +51,8 @@ public class ClosingService {
                 detailBatch.add(new Object[]{ voucherNo, ++lineNo, code, name, BigDecimal.ZERO, amt, "结转收入-" + period });
             }
             detailBatch.add(new Object[]{ voucherNo, ++lineNo, "4104", "本年利润", totalCredit, BigDecimal.ZERO, "结转收入到本年利润-" + period });
-            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',DATE_ADD(?,INTERVAL 1 MONTH),?,?,?,?,'已审核','月结结转收入')",
-                voucherNo, nextPeriodFirst, period, totalCredit, totalCredit, "系统");
+            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',DATE_ADD(?,INTERVAL 1 MONTH),?,?,?,?,'已审核','月结结转收入',?)",
+                voucherNo, nextPeriodFirst, period, totalCredit, totalCredit, "系统", com.erp.config.CompanyContext.get());
             for (Object[] d : detailBatch) {
                 db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,?,?,?,?,?,?)", d);
             }
@@ -73,8 +73,8 @@ public class ClosingService {
                 detailBatch.add(new Object[]{ voucherNo, ++lineNo, code, name, amt, BigDecimal.ZERO, "结转费用-" + period });
             }
             detailBatch.add(new Object[]{ voucherNo, ++lineNo, "4104", "本年利润", BigDecimal.ZERO, totalDebit, "结转费用到本年利润-" + period });
-            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',DATE_ADD(?,INTERVAL 1 MONTH),?,?,?,?,'已审核','月结结转费用')",
-                voucherNo, nextPeriodFirst, period, totalDebit, totalDebit, "系统");
+            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',DATE_ADD(?,INTERVAL 1 MONTH),?,?,?,?,'已审核','月结结转费用',?)",
+                voucherNo, nextPeriodFirst, period, totalDebit, totalDebit, "系统", com.erp.config.CompanyContext.get());
             for (Object[] d : detailBatch) {
                 db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,?,?,?,?,?,?)", d);
             }
@@ -82,44 +82,44 @@ public class ClosingService {
 
         // 5. 计算净利润 = 收入 - 费用
         BigDecimal revenue = db.queryForObject(
-            "SELECT COALESCE(SUM(credit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%'",
-            BigDecimal.class, period);
+            "SELECT COALESCE(SUM(credit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND COALESCE(company_code,'HQ')=?",
+            BigDecimal.class, period, com.erp.config.CompanyContext.get());
         BigDecimal expense = db.queryForObject(
-            "SELECT COALESCE(SUM(debit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%'",
-            BigDecimal.class, period);
+            "SELECT COALESCE(SUM(debit_amount),0) FROM account_subject_balance WHERE period=? AND subject_code LIKE '6%' AND COALESCE(company_code,'HQ')=?",
+            BigDecimal.class, period, com.erp.config.CompanyContext.get());
         BigDecimal profit = revenue.subtract(expense).setScale(2, RoundingMode.HALF_UP);
 
         // 6. 清零损益类科目本期余额（已结转）
-        db.update("UPDATE account_subject_balance SET end_balance=0, remark='已结账' WHERE period=? AND subject_code LIKE '6%'", period);
+        db.update("UPDATE account_subject_balance SET end_balance=0, remark='已结账' WHERE period=? AND subject_code LIKE '6%' AND COALESCE(company_code,'HQ')=?", period, com.erp.config.CompanyContext.get());
 
         // 7. 把净利润计入 4104 未分配利润（如该期间无 4104 余额则插入）
-        List<Map<String,Object>> ret = db.queryForList("SELECT id FROM account_subject_balance WHERE subject_code='4104' AND period=?", period);
+        List<Map<String,Object>> ret = db.queryForList("SELECT id FROM account_subject_balance WHERE subject_code='4104' AND period=? AND COALESCE(company_code,'HQ')=?", period, com.erp.config.CompanyContext.get());
         BigDecimal four104End = profit;
         if (ret.isEmpty()) {
-            db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance,remark) VALUES('4104','本年利润',?,0,0,?,?,'月结转入净利润')",
-                period, profit.max(BigDecimal.ZERO), four104End);
+            db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance,remark,company_code) VALUES('4104','本年利润',?,0,0,?,?,'月结转入净利润',?)",
+                period, profit.max(BigDecimal.ZERO), four104End, com.erp.config.CompanyContext.get());
         } else {
             // 借方累计费用 / 贷方累计收入 已冲销在 4104 上
-            db.update("UPDATE account_subject_balance SET credit_amount=credit_amount+?, end_balance=end_balance+? WHERE subject_code='4104' AND period=?",
-                profit.max(BigDecimal.ZERO), profit, period);
+            db.update("UPDATE account_subject_balance SET credit_amount=credit_amount+?, end_balance=end_balance+? WHERE subject_code='4104' AND period=? AND COALESCE(company_code,'HQ')=?",
+                profit.max(BigDecimal.ZERO), profit, period, com.erp.config.CompanyContext.get());
         }
 
         // 8. 把本期所有科目 end_balance 复制为下期 begin_balance（损益类已被清零）
         String nextPeriod = nextPeriod(period);
         // 同科目已存在下期记录则 UPDATE begin_balance，不存在则 INSERT
         List<Map<String,Object>> allSubjects = db.queryForList(
-            "SELECT subject_code, subject_name, end_balance FROM account_subject_balance WHERE period=? AND subject_code NOT LIKE '6%'", period);
+            "SELECT subject_code, subject_name, end_balance FROM account_subject_balance WHERE period=? AND subject_code NOT LIKE '6%' AND COALESCE(company_code,'HQ')=?", period, com.erp.config.CompanyContext.get());
         for (Map<String,Object> r : allSubjects) {
             String code = String.valueOf(r.get("subject_code"));
             String name = String.valueOf(r.get("subject_name"));
             BigDecimal end = toBD(r.get("end_balance"));
-            Integer cnt = db.queryForObject("SELECT COUNT(*) FROM account_subject_balance WHERE subject_code=? AND period=?", Integer.class, code, nextPeriod);
+            Integer cnt = db.queryForObject("SELECT COUNT(*) FROM account_subject_balance WHERE subject_code=? AND period=? AND COALESCE(company_code,'HQ')=?", Integer.class, code, nextPeriod, com.erp.config.CompanyContext.get());
             if (cnt != null && cnt > 0) {
-                db.update("UPDATE account_subject_balance SET begin_balance=?, end_balance=begin_balance+debit_amount-credit_amount WHERE subject_code=? AND period=?",
-                    end, code, nextPeriod);
+                db.update("UPDATE account_subject_balance SET begin_balance=?, end_balance=begin_balance+debit_amount-credit_amount WHERE subject_code=? AND period=? AND COALESCE(company_code,'HQ')=?",
+                    end, code, nextPeriod, com.erp.config.CompanyContext.get());
             } else {
-                db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance) VALUES(?,?,?,?,0,0,?)",
-                    code, name, nextPeriod, end, end);
+                db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance,company_code) VALUES(?,?,?,?,0,0,?,?)",
+                    code, name, nextPeriod, end, end, com.erp.config.CompanyContext.get());
             }
         }
 
@@ -137,8 +137,8 @@ public class ClosingService {
             try {
                 monthEndClose(period);
                 BigDecimal p = db.queryForObject(
-                    "SELECT COALESCE(end_balance,0) FROM account_subject_balance WHERE period=? AND subject_code='4104'",
-                    BigDecimal.class, period);
+                    "SELECT COALESCE(end_balance,0) FROM account_subject_balance WHERE period=? AND subject_code='4104' AND COALESCE(company_code,'HQ')=?",
+                    BigDecimal.class, period, com.erp.config.CompanyContext.get());
                 if (p != null) yearProfit = yearProfit.add(p);
             } catch (Exception e) {
                 System.err.println("Year close month " + period + " failed: " + e.getMessage());
@@ -148,21 +148,21 @@ public class ClosingService {
         String nextYear = String.valueOf(Integer.parseInt(year) + 1);
         String janPeriod = nextYear + "-01";
         BigDecimal four104Balance = db.queryForObject(
-            "SELECT COALESCE(SUM(end_balance),0) FROM account_subject_balance WHERE subject_code='4104' AND period BETWEEN ? AND ?",
-            BigDecimal.class, year + "-01", year + "-12");
+            "SELECT COALESCE(SUM(end_balance),0) FROM account_subject_balance WHERE subject_code='4104' AND period BETWEEN ? AND ? AND COALESCE(company_code,'HQ')=?",
+            BigDecimal.class, year + "-01", year + "-12", com.erp.config.CompanyContext.get());
         if (four104Balance == null) four104Balance = BigDecimal.ZERO;
         if (four104Balance.signum() != 0) {
-            Integer cnt = db.queryForObject("SELECT COUNT(*) FROM account_subject_balance WHERE subject_code='4103' AND period=?", Integer.class, janPeriod);
+            Integer cnt = db.queryForObject("SELECT COUNT(*) FROM account_subject_balance WHERE subject_code='4103' AND period=? AND COALESCE(company_code,'HQ')=?", Integer.class, janPeriod, com.erp.config.CompanyContext.get());
             if (cnt != null && cnt > 0) {
-                db.update("UPDATE account_subject_balance SET begin_balance=begin_balance+?, end_balance=end_balance+? WHERE subject_code='4103' AND period=?",
-                    four104Balance, four104Balance, janPeriod);
+                db.update("UPDATE account_subject_balance SET begin_balance=begin_balance+?, end_balance=end_balance+? WHERE subject_code='4103' AND period=? AND COALESCE(company_code,'HQ')=?",
+                    four104Balance, four104Balance, janPeriod, com.erp.config.CompanyContext.get());
             } else {
-                db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance) VALUES('4103','未分配利润',?,?,0,?,?)",
-                    janPeriod, four104Balance, four104Balance, four104Balance);
+                db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance,company_code) VALUES('4103','未分配利润',?,?,0,?,?,?)",
+                    janPeriod, four104Balance, four104Balance, four104Balance, com.erp.config.CompanyContext.get());
             }
             // 清零 4104 年底余额
-            db.update("UPDATE account_subject_balance SET end_balance=0 WHERE subject_code='4104' AND period BETWEEN ? AND ?",
-                year + "-01", year + "-12");
+            db.update("UPDATE account_subject_balance SET end_balance=0 WHERE subject_code='4104' AND period BETWEEN ? AND ? AND COALESCE(company_code,'HQ')=?",
+                year + "-01", year + "-12", com.erp.config.CompanyContext.get());
         }
         db.update("INSERT INTO sys_month_end_op(op_code,month_period,month_end_date,month_end_status,operator,remark) VALUES(?,?,DATE_ADD(CONCAT(?,'-12-31'),INTERVAL 1 DAY),'已完成','系统',?)",
             "YCLOSE-"+System.currentTimeMillis(), year, year, "年结完成,净利润=" + yearProfit.setScale(2, RoundingMode.HALF_UP).toPlainString() + " 4104→4103已结转");

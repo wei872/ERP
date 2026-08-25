@@ -58,6 +58,7 @@ public class SummaryService {
         CONFIGS.put("cust_contract_main",      new Cfg(new String[][]{{"amount","合同金额合计"}}, "sign_date", "status"));
         CONFIGS.put("trade_stock_check",       new Cfg(new String[][]{{"diff_amount","盘点差异金额合计"}}, "check_date", "status"));
         CONFIGS.put("prod_quotation",          new Cfg(new String[][]{{"quote_amount","报价金额合计"}}, "quote_date", "audit_status"));
+        CONFIGS.put("trade_sales_return",      new Cfg(new String[][]{{"total_amount","退货金额合计"}}, "return_date", "status"));
         CONFIGS.put("sys_log_operation",       new Cfg(null, "created_at", "module")
             .extra("DATE(created_at)=CURDATE()", "今日操作数"));
         CONFIGS.put("sys_login_log",           new Cfg(null, "login_time", "login_status")

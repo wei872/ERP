@@ -154,8 +154,8 @@ public class ProductionService {
         if (totalCost.signum() > 0) {
             String vn = "VZ-PROD-" + System.currentTimeMillis();
             String period = new SimpleDateFormat("yyyy-MM").format(new Date());
-            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
-                vn, period, totalCost, totalCost, "生产完工入库成本结转:" + workOrderNo);
+            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+                vn, period, totalCost, totalCost, "生产完工入库成本结转:" + workOrderNo, com.erp.config.CompanyContext.get());
             db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'1405','库存商品',?,0,?)",
                 vn, totalCost, "完工入库成本-" + productCode);
             db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'5001','生产成本',0,?,?)",
@@ -211,6 +211,12 @@ public class ProductionService {
         String productCode = String.valueOf(req.get("product_code"));
         inventory.stockOut(productCode, warehouse, actualQty);
         db.update("UPDATE prod_material_requisition SET actual_req_qty=actual_req_qty+? WHERE req_no=?", actualQty, reqNo.trim());
+        // 批次联动：领料按 FIFO 耗用原料批次（以工单号为去向，供完工入库回写成分清单）
+        try {
+            String woTarget = req.get("ref_work_order") != null && !String.valueOf(req.get("ref_work_order")).isEmpty()
+                ? String.valueOf(req.get("ref_work_order")) : reqNo.trim();
+            batch.consumeLineForTarget(productCode, actualQty, woTarget, "生产领料");
+        } catch (Exception e) { System.err.println("[batch] 领料批次耗用跳过: " + e.getMessage()); }
 
         // 获取该物料的当前成本，自动联动生产领料凭证 (借: 5001 生产成本, 贷: 1403 原材料)
         BigDecimal unitCost = BigDecimal.ZERO;
@@ -222,8 +228,8 @@ public class ProductionService {
         if (matCost.signum() > 0) {
             String vn = "VZ-REQ-" + System.currentTimeMillis();
             String period = new SimpleDateFormat("yyyy-MM").format(new Date());
-            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
-                vn, period, matCost, matCost, "生产领料成本结转:" + reqNo);
+            db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+                vn, period, matCost, matCost, "生产领料成本结转:" + reqNo, com.erp.config.CompanyContext.get());
             db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'5001','生产成本',?,0,?)",
                 vn, matCost, "生产直接领料-" + productCode);
             db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1403','原材料',0,?,?)",

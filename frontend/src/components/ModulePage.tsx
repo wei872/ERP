@@ -207,6 +207,20 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     } catch (e: any) { toastNotify('转换失败：' + (e.message || '')); }
   }, [fetchData, currentPage, search, sortCol, sortDir]);
 
+  // 销售退货：退货单 + 回库 + 红字凭证 + 应收冲减
+  const doSalesReturn = useCallback(async (no: string) => {
+    const input = window.prompt(`销售单 ${no} 退货：请输入退货数量（留空 = 首行商品全退）`, '');
+    if (input === null) return;
+    const qty = input.trim() === '' ? undefined : Number(input);
+    if (qty !== undefined && (!Number.isFinite(qty) || qty <= 0)) { toastNotify('退货数量无效', 'warn'); return; }
+    const reason = window.prompt('退货原因（可留空）', '销售退货') ?? '销售退货';
+    try {
+      const r = await bizApi.salesReturn({ ref_sales_no: no, qty, reason });
+      toastNotify(`退货完成：${r.data.return_no} · 冲减 ¥${Number(r.data.amount).toLocaleString()}（红字凭证 ${r.data.voucher_no}）`);
+      fetchData(currentPage, search, sortCol, sortDir);
+    } catch (e: any) { toastNotify('退货失败：' + (e.message || '')); }
+  }, [fetchData, currentPage, search, sortCol, sortDir]);
+
   const handleFileUpload = useCallback((k: string, file: File | null) => {
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
@@ -433,6 +447,7 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
                   {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => setPrintRow(row as any)} className="px-2.5 py-1 text-[11px] text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors font-medium">🖨️ 打印</button>}
                   {tableKey === 'prod_quotation' && ['已报价', '待审核'].includes(String((row as any).audit_status)) && <button onClick={() => doQuoteApprove(String((row as any).quote_no))} className="px-2.5 py-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors font-medium">✓ 审批</button>}
                   {tableKey === 'prod_quotation' && String((row as any).audit_status) === '已通过' && <button onClick={() => doQuoteToSale(String((row as any).quote_no))} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">🔁 转订单</button>}
+                  {tableKey === 'trade_sales_main' && ['已出库', '已完成'].includes(String((row as any).shipping_status)) && <button onClick={() => doSalesReturn(String((row as any).sales_no))} className="px-2.5 py-1 text-[11px] text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-md transition-colors font-medium">↩ 退货</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}

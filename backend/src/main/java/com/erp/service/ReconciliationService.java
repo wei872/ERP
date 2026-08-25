@@ -57,8 +57,8 @@ public class ReconciliationService {
         String vn = "VZ-REC-" + System.currentTimeMillis();
         String period = new SimpleDateFormat("yyyy-MM").format(new Date());
         BigDecimal amt = amount.setScale(2, RoundingMode.HALF_UP);
-        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
-            vn, period, amt, amt, "应收核销自动凭证:" + no);
+        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+            vn, period, amt, amt, "应收核销自动凭证:" + no, com.erp.config.CompanyContext.get());
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'1002','银行存款',?,0,?)", vn, amt, "核销回款-" + no);
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1122','应收账款',0,?,?)", vn, amt, "核销应收-" + no);
         finance.updateBalance("1002", "银行存款", amt, BigDecimal.ZERO);
@@ -95,8 +95,8 @@ public class ReconciliationService {
         String vn = "VZ-PAY-" + System.currentTimeMillis();
         String period = new SimpleDateFormat("yyyy-MM").format(new Date());
         BigDecimal amt = amount.setScale(2, RoundingMode.HALF_UP);
-        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)",
-            vn, period, amt, amt, "应付核销自动凭证:" + no);
+        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,remark,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?,?)",
+            vn, period, amt, amt, "应付核销自动凭证:" + no, com.erp.config.CompanyContext.get());
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'2202','应付账款',?,0,?)", vn, amt, "核销应付-" + no);
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'1002','银行存款',0,?,?)", vn, amt, "核销付款-" + no);
         finance.updateBalance("2202", "应付账款", amt, BigDecimal.ZERO);

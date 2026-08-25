@@ -1029,6 +1029,9 @@ INSERT IGNORE INTO cust_contract_main (contract_no,contract_name,contract_type,p
 ('CT-2025-015','包装材料采购合同','采购合同','佛山包装材料厂',86000.00,DATE_SUB(CURDATE(), INTERVAL 420 DAY),DATE_SUB(CURDATE(), INTERVAL 410 DAY),DATE_SUB(CURDATE(), INTERVAL 60 DAY),'周八','已完结',''),
 ('CT-2026-007','北方自动化试点合同','销售合同','北方自动化设备公司',150000.00,DATE_SUB(CURDATE(), INTERVAL 40 DAY),DATE_SUB(CURDATE(), INTERVAL 30 DAY),DATE_ADD(CURDATE(), INTERVAL 150 DAY),'张三','草稿',''),
 ('CT-2025-011','旧产线改造合同','销售合同','深港电子科技公司',220000.00,DATE_SUB(CURDATE(), INTERVAL 560 DAY),DATE_SUB(CURDATE(), INTERVAL 550 DAY),DATE_SUB(CURDATE(), INTERVAL 200 DAY),'张三','已终止','');
+INSERT IGNORE INTO trade_sales_return (return_no,ref_sales_no,customer_code,customer_name,return_date,return_reason,total_amount,handler,status,remark) VALUES
+('SR-D-001','SO-0001','C-002','南方物联科技公司',DATE_SUB(CURDATE(), INTERVAL 242 DAY),'外观瑕疵退货',2350.00,'李四','已入库','退货:FG-003 x1'),
+('SR-D-002','SO-0002','C-002','南方物联科技公司',DATE_SUB(CURDATE(), INTERVAL 242 DAY),'客户订单变更退货',2350.00,'李四','已入库','退货:FG-003 x1');
 INSERT IGNORE INTO trade_warehouse_main (warehouse_code,warehouse_name,warehouse_type,manager,location,status,remark) VALUES
 ('WH-01','原料仓','原料仓','李四','A区-1层','启用','原材料/元器件存储，采购入库与生产领料'),
 ('WH-02','成品仓','成品仓','李四','B区-1层','启用','产成品存储，生产入库与销售发货'),

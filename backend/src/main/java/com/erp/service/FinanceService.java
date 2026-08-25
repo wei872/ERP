@@ -26,7 +26,7 @@ public class FinanceService {
         if (amt.compareTo(BigDecimal.ZERO) <= 0) return;
         String vn = "VZ-" + System.currentTimeMillis();
         String period = new SimpleDateFormat("yyyy-MM").format(new Date());
-        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核')", vn, period, amt, amt);
+        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)", vn, period, amt, amt, com.erp.config.CompanyContext.get());
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'1122','应收账款',?,0,?)", vn, amt, "销售-" + sale.get("sales_no"));
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'6001','主营业务收入',0,?,?)", vn, amt, "销售-" + sale.get("sales_no"));
         updateBalance("1122", "应收账款", amt, BigDecimal.ZERO);
@@ -49,7 +49,7 @@ public class FinanceService {
         if (amt.compareTo(BigDecimal.ZERO) <= 0) return;
         String vn = "VZ-" + System.currentTimeMillis();
         String period = new SimpleDateFormat("yyyy-MM").format(new Date());
-        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核')", vn, period, amt, amt);
+        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,company_code) VALUES(?,'记',CURDATE(),?,?,?,'系统','已审核',?)", vn, period, amt, amt, com.erp.config.CompanyContext.get());
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,1,'1403','原材料',?,0,?)", vn, amt, "采购-" + po.get("purchase_no"));
         db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,2,'2202','应付账款',0,?,?)", vn, amt, "采购-" + po.get("purchase_no"));
         updateBalance("1403", "原材料", amt, BigDecimal.ZERO);
@@ -98,17 +98,18 @@ public class FinanceService {
         try {
             boolean isCredit = CREDIT_SUBJECTS.contains(code);
             String period = new SimpleDateFormat("yyyy-MM").format(new Date());
-            List<Map<String,Object>> rows = db.queryForList("SELECT begin_balance,debit_amount,credit_amount,end_balance FROM account_subject_balance WHERE subject_code=? AND period=?", code, period);
+            String cc = com.erp.config.CompanyContext.get();
+            List<Map<String,Object>> rows = db.queryForList("SELECT begin_balance,debit_amount,credit_amount,end_balance FROM account_subject_balance WHERE subject_code=? AND period=? AND COALESCE(company_code,'HQ')=?", code, period, cc);
             if (!rows.isEmpty()) {
                 BigDecimal b = new BigDecimal(rows.get(0).get("begin_balance").toString());
                 BigDecimal d = new BigDecimal(rows.get(0).get("debit_amount").toString());
                 BigDecimal c = new BigDecimal(rows.get(0).get("credit_amount").toString());
                 d = d.add(debit); c = c.add(credit);
                 BigDecimal end = isCredit ? b.subtract(d).add(c).setScale(2, RoundingMode.HALF_UP) : b.add(d).subtract(c).setScale(2, RoundingMode.HALF_UP);
-                db.update("UPDATE account_subject_balance SET debit_amount=?,credit_amount=?,end_balance=? WHERE subject_code=? AND period=?", d, c, end, code, period);
+                db.update("UPDATE account_subject_balance SET debit_amount=?,credit_amount=?,end_balance=? WHERE subject_code=? AND period=? AND COALESCE(company_code,'HQ')=?", d, c, end, code, period, cc);
             } else {
                 BigDecimal end = isCredit ? credit.subtract(debit).setScale(2, RoundingMode.HALF_UP) : debit.subtract(credit).setScale(2, RoundingMode.HALF_UP);
-                db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance) VALUES(?,?,?,0,?,?,?)", code, name, period, debit, credit, end);
+                db.update("INSERT INTO account_subject_balance(subject_code,subject_name,period,begin_balance,debit_amount,credit_amount,end_balance,company_code) VALUES(?,?,?,0,?,?,?,?)", code, name, period, debit, credit, end, cc);
             }
         } catch (Exception e) { throw new RuntimeException("余额更新失败["+code+"]: " + e.getMessage(), e); }
     }
