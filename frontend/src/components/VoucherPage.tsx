@@ -1,6 +1,6 @@
 import { toastNotify } from '../utils/toast';
-import { useState, lazy, Suspense } from 'react';
-import { bizApi } from '../api';
+import { useState, useEffect, lazy, Suspense } from 'react';
+import { bizApi, dataApi } from '../api';
 
 const VoucherListPanel = lazy(() => import('./VoucherListPanel'));
 
@@ -23,6 +23,32 @@ export default function VoucherPage() {
   ]);
   const [saving, setSaving] = useState(false);
   const [vtab, setVtab] = useState<'entry' | 'list'>('entry');
+  // 凭证模板（常用分录一键调用）
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selTpl, setSelTpl] = useState('');
+  useEffect(() => {
+    dataApi.list('finance_voucher_template', 1, 50, '').then(r => setTemplates(r.data?.rows || [])).catch(() => {});
+  }, []);
+  const loadTemplate = () => {
+    const t = templates.find(x => String(x.id) === selTpl);
+    if (!t) { toastNotify('请先选择模板', 'warn'); return; }
+    try {
+      const ls = JSON.parse(String(t.lines_json)) as Line[];
+      setLines(ls.map(l => ({ subject_code: String(l.subject_code || ''), subject_name: String(l.subject_name || ''), debit_amount: Number(l.debit_amount) || 0, credit_amount: Number(l.credit_amount) || 0, summary: String(l.summary || '') })));
+      toastNotify(`已载入模板「${t.template_name}」，请核对金额后保存`);
+    } catch { toastNotify('模板数据解析失败'); }
+  };
+  const saveAsTemplate = async () => {
+    if (!balanced) { toastNotify('请先录入借贷平衡的分录', 'warn'); return; }
+    const name = window.prompt('模板名称（如：支付运费）', '');
+    if (!name) return;
+    try {
+      await dataApi.create('finance_voucher_template', { template_name: name.trim(), description: `${lines.length} 行分录`, lines_json: JSON.stringify(lines), created_by: '手工' });
+      toastNotify(`模板「${name}」已保存`);
+      const r = await dataApi.list('finance_voucher_template', 1, 50, '');
+      setTemplates(r.data?.rows || []);
+    } catch (e: any) { toastNotify('保存失败：' + (e.message || '') + '（模板名不可重复）'); }
+  };
 
   // 从销售/采购单生成
   const [saleId, setSaleId] = useState('');
@@ -141,6 +167,17 @@ export default function VoucherPage() {
 
         <div className="bg-white rounded-xl p-5 shadow-sm border lg:col-span-2">
           <h3 className="font-semibold text-gray-800 mb-3">✍️ 手工录入凭证</h3>
+          {/* 凭证模板：常用分录一键调用 */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl bg-indigo-50/50 border border-indigo-100">
+            <span className="text-xs font-semibold text-indigo-700 shrink-0">📑 凭证模板</span>
+            <select value={selTpl} onChange={e => setSelTpl(e.target.value)} className="px-2 py-1.5 border border-indigo-200 rounded-lg text-xs bg-white min-w-[170px] outline-none focus:border-indigo-400">
+              <option value="">选择常用分录模板…</option>
+              {templates.map(t => <option key={t.id} value={String(t.id)}>{t.template_name}</option>)}
+            </select>
+            <button onClick={loadTemplate} disabled={!selTpl} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium disabled:opacity-40 hover:bg-indigo-700 transition-colors">载入分录</button>
+            <button onClick={saveAsTemplate} className="px-3 py-1.5 rounded-lg bg-white border border-indigo-200 text-indigo-600 text-xs font-medium hover:bg-indigo-50 transition-colors">💾 存当前为模板</button>
+            <span className="text-[10px] text-indigo-400 ml-auto hidden sm:inline">模板只存分录结构，保存凭证前请核对金额</span>
+          </div>
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div>
               <label className="text-xs text-gray-500">凭证字</label>

@@ -308,6 +308,18 @@ export default function InventoryClosingPage() {
               <span>🧭</span>
               <span>安全库存补货建议</span>
               {replenish.length > 0 && <span className="text-[11px] bg-red-50 text-red-600 border border-red-100 px-2 py-0.5 rounded-full font-semibold">{replenish.length} 项低于安全线</span>}
+              {replenish.length > 0 && (
+                <button onClick={async () => {
+                  if (!confirm(`将 ${replenish.length} 项补货建议生成采购建议单（按供应商分单，状态待审批）？`)) return;
+                  setSaving(true);
+                  try {
+                    const r = await bizApi.replenishToPurchase();
+                    toastNotify(`已生成 ${r.data.po_count} 张采购建议单：${r.data.po_nos.join('、')}`);
+                    loadPanoramicData();
+                  } catch (e: any) { toastNotify('生成失败：' + (e.message || '')); }
+                  setSaving(false);
+                }} disabled={saving} className="ml-auto px-3.5 py-1.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-lg text-[11px] font-semibold shadow-md disabled:opacity-50">⚡ 一键转采购建议单</button>
+              )}
             </h3>
             <p className="text-[11px] text-slate-400 mb-4">建议补货量 = 安全线 × 2 − 现有库存 − 采购在途；在途取已下单未入库的采购明细数量</p>
             {replenish.length === 0 ? (
@@ -583,7 +595,7 @@ export default function InventoryClosingPage() {
 
           {/* 最近盘点记录 */}
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-            <h4 className="font-bold text-slate-800 text-sm mb-3">🗂️ 最近盘点记录（`trade_stock_check`）</h4>
+            <h4 className="font-bold text-slate-800 text-sm mb-3">🧾 盘点流水（`trade_stock_check`）</h4>
             {ckRecords.length === 0 ? <p className="text-xs text-slate-400 text-center py-6">暂无盘点记录</p> : (
               <div className="overflow-x-auto">
                 <table className="erp-table text-xs">

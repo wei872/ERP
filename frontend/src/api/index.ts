@@ -86,6 +86,7 @@ export const bizApi = {
   quoteApprove: (quoteNo: string) => request(`/biz/quote-approve/${encodeURIComponent(quoteNo)}`, { method: 'POST' }),
   quoteToSale: (quoteNo: string) => request<any>(`/biz/quote-to-sale/${encodeURIComponent(quoteNo)}`, { method: 'POST' }),
   salesReturn: (body: { ref_sales_no: string; product_code?: string; qty?: number; reason?: string }) => request<any>('/biz/sales-return', { method: 'POST', body: JSON.stringify(body) }),
+  replenishToPurchase: () => request<{ po_count: number; po_nos: string[] }>('/biz/replenish-to-purchase', { method: 'POST' }),
   importExcel: async (type: string, file: File) => {
     const token = localStorage.getItem('erp_token');
     const fd = new FormData();

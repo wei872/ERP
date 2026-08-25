@@ -232,6 +232,30 @@ INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('trade_sales_return','销售退货单','进销存管理','销售管理',914);
 
+-- ── 凭证模板：常用分录一键调用 ──
+CREATE TABLE IF NOT EXISTS finance_voucher_template (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  template_name VARCHAR(100) COMMENT '模板名称',
+  description VARCHAR(200) COMMENT '用途说明',
+  lines_json LONGTEXT COMMENT '分录行JSON [{subject_code,subject_name,debit_amount,credit_amount,summary}]',
+  created_by VARCHAR(50),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_vt_name (template_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('finance_voucher_template','凭证模板','财务管理','凭证模板',915);
+
+INSERT IGNORE INTO finance_voucher_template(template_name, description, lines_json, created_by) VALUES
+('提现备用金', '从银行提取现金作为备用金（借:1001 库存现金 / 贷:1002 银行存款）',
+ '[{"subject_code":"1001","subject_name":"库存现金","debit_amount":5000,"credit_amount":0,"summary":"提现备用金"},{"subject_code":"1002","subject_name":"银行存款","debit_amount":0,"credit_amount":5000,"summary":"提现备用金"}]', '系统'),
+('支付办公费用', '以银行存款支付办公费用（借:6602 管理费用 / 贷:1002 银行存款）',
+ '[{"subject_code":"6602","subject_name":"管理费用","debit_amount":2000,"credit_amount":0,"summary":"办公费用"},{"subject_code":"1002","subject_name":"银行存款","debit_amount":0,"credit_amount":2000,"summary":"支付办公费用"}]', '系统'),
+('股东追加投资', '收到股东追加投资款（借:1002 银行存款 / 贷:4001 实收资本）',
+ '[{"subject_code":"1002","subject_name":"银行存款","debit_amount":100000,"credit_amount":0,"summary":"收到投资款"},{"subject_code":"4001","subject_name":"实收资本","debit_amount":0,"credit_amount":100000,"summary":"股东追加投资"}]', '系统'),
+('计提本月折旧', '计提固定资产折旧（借:6602 管理费用 / 贷:1602 累计折旧）',
+ '[{"subject_code":"6602","subject_name":"管理费用","debit_amount":3500,"credit_amount":0,"summary":"计提折旧"},{"subject_code":"1602","subject_name":"累计折旧","debit_amount":0,"credit_amount":3500,"summary":"计提折旧"}]', '系统');
+
 -- ── 总账按公司隔离：科目余额增加公司维度 ──
 SET @c12 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='account_subject_balance' AND column_name='company_code');
 SET @s12 = IF(@c12=0, "ALTER TABLE account_subject_balance ADD COLUMN company_code VARCHAR(50) DEFAULT 'HQ' COMMENT '公司编码（账套）'", 'SELECT 1'); PREPARE st12 FROM @s12; EXECUTE st12; DEALLOCATE PREPARE st12;

@@ -787,6 +787,57 @@ public class BizController {
         catch (Exception e) { return Result.ok(java.util.Collections.emptyList()); }
     }
 
+    // ── 补货建议一键生成采购建议单（按供应商分单，草稿状态待审批） ──
+    @PostMapping("/replenish-to-purchase")
+    @Transactional
+    public Result replenishToPurchase(HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"procurement".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> suggestions = report.replenishSuggestions();
+            if (suggestions.isEmpty()) return Result.error("当前无低于安全线的物料，无需补货");
+            // 按供应商分组（空供应商归入默认供应商）
+            Map<String, List<Map<String,Object>>> bySupplier = new LinkedHashMap<>();
+            for (Map<String,Object> s : suggestions) {
+                String sup = s.get("supplier") == null || String.valueOf(s.get("supplier")).isEmpty() ? "默认供应商" : String.valueOf(s.get("supplier"));
+                bySupplier.computeIfAbsent(sup, k -> new ArrayList<>()).add(s);
+            }
+            List<String> poNos = new ArrayList<>();
+            for (Map.Entry<String, List<Map<String,Object>>> e : bySupplier.entrySet()) {
+                String poNo = "PO-SUG-" + System.currentTimeMillis() + "-" + (poNos.size() + 1);
+                java.math.BigDecimal total = java.math.BigDecimal.ZERO;
+                List<Object[]> lines = new ArrayList<>();
+                int lineNo = 0;
+                for (Map<String,Object> s : e.getValue()) {
+                    String code = String.valueOf(s.get("product_code"));
+                    java.math.BigDecimal qty = new java.math.BigDecimal(String.valueOf(s.get("suggest_qty")));
+                    java.math.BigDecimal price = java.math.BigDecimal.ZERO;
+                    String name = String.valueOf(s.get("product_name"));
+                    try {
+                        List<Map<String,Object>> g = db.queryForList("SELECT purchase_price, product_name FROM trade_goods_main WHERE product_code=?", code);
+                        if (!g.isEmpty()) {
+                            if (g.get(0).get("purchase_price") != null) price = new java.math.BigDecimal(g.get(0).get("purchase_price").toString());
+                            if (g.get(0).get("product_name") != null) name = String.valueOf(g.get(0).get("product_name"));
+                        }
+                    } catch (Exception ignored) {}
+                    java.math.BigDecimal amount = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
+                    total = total.add(amount);
+                    lines.add(new Object[]{ poNo, ++lineNo, code, name, qty, price, amount });
+                }
+                db.update("INSERT INTO trade_purchase_main(purchase_no,supplier_code,supplier_name,purchase_date,total_amount,buyer,purchase_status,warehouse,remark) VALUES(?,?,?,CURDATE(),?,?, '待审批','原料仓','库存预警补货建议自动生成')",
+                    poNo, "", e.getKey(), total, user(req));
+                for (Object[] l : lines) {
+                    db.update("INSERT INTO trade_purchase_detail(purchase_no,line_no,product_code,product_name,qty,unit_price,amount) VALUES(?,?,?,?,?,?,?)", l);
+                }
+                poNos.add(poNo);
+            }
+            audit.log(user(req), "采购", "补货转采购单", "共" + poNos.size() + "张:" + String.join(",", poNos), audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("po_count", poNos.size());
+            ret.put("po_nos", poNos);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("生成采购建议单失败: " + e.getMessage()); }
+    }
+
     // ── 销售目标达成率 ──
     @GetMapping("/target-progress") public Result targetProgress() {
         try {

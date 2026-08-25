@@ -33,7 +33,7 @@ function PageFallback() {
 
 type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
-  | { type: 'table'; tableKey: string }
+  | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
   | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' };
 
@@ -401,7 +401,7 @@ export default function Layout() {
         {page.type === 'recycle' && <RecycleBinPage />}
         {page.type === 'mapproval' && <MobileApprovalPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
-        {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
+        {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage key={page.tableKey + '|' + (page.search || '')} tableKey={page.tableKey} initialSearch={page.search || ''} />}
         </Suspense>
       </main>
       {bigScreen && <Suspense fallback={null}><BigScreen onExit={() => setBigScreen(false)} /></Suspense>}

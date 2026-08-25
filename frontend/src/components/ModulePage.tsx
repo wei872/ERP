@@ -35,7 +35,7 @@ function formatCellDate(v: unknown): string {
   return s.length >= 10 ? s.slice(0, 10) : s;
 }
 
-export default function ModulePage({ tableKey }: { tableKey: string }) {
+export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey: string; initialSearch?: string }) {
   const { currentUser } = useAuth();
   const [search, setSearch] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -148,8 +148,8 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     setLoaded(true); setLoading(false);
   }, [table, tableKey, pageSize]);
 
-  // 首次加载 + tableKey 变化（列元数据就绪后才拉数据）
-  useEffect(() => { setLoaded(false); setSearch(''); setCurrentPage(1); setSortCol(''); setSortDir('desc'); if (table) fetchData(1, ''); }, [tableKey, table]);
+  // 首次加载 + tableKey 变化（列元数据就绪后才拉数据；支持钻取带入初始搜索）
+  useEffect(() => { setLoaded(false); setSearch(initialSearch); setCurrentPage(1); setSortCol(''); setSortDir('desc'); if (table) fetchData(1, initialSearch); }, [tableKey, table, initialSearch]);
 
   // 点击表头排序：同列切换方向，新列默认降序
   const toggleSort = useCallback((colName: string) => {

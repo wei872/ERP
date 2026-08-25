@@ -93,6 +93,15 @@ function relTime(d: unknown): string {
 }
 
 /** 经营动态：最近的销售/采购/凭证/审批/库存事件，业务脉搏一目了然 */
+/** 经营动态钻取：按业务类型跳转对应数据表并带上单号搜索 */
+function drillFromFeed(it: any) {
+  const kindMap: Record<string, string> = { sale: 'trade_sales_main', purchase: 'trade_purchase_main', voucher: 'voucher_main', approval: 'oa_approval_main', stock: 'trade_stock_log' };
+  const tableKey = kindMap[it.kind];
+  if (!tableKey) return;
+  const no = String(it.title || '').split(' ')[1] || '';
+  window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey, search: no } }));
+}
+
 function ActivityFeed({ items }: { items: any[] }) {
   return (
     <div className="erp-card p-5 h-full">
@@ -108,7 +117,7 @@ function ActivityFeed({ items }: { items: any[] }) {
             const m = FEED_META[it.kind] || FEED_META.stock;
             const amt = Number(it.amount);
             return (
-              <div key={i} className="flex items-center gap-3 py-1.5 border-b border-slate-50 last:border-0">
+              <div key={i} onClick={() => drillFromFeed(it)} title="点击钻取到对应数据表" className="flex items-center gap-3 py-1.5 border-b border-slate-50 last:border-0 cursor-pointer rounded-lg px-1 -mx-1 hover:bg-indigo-50/60 transition-colors">
                 <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm shrink-0 ${m.cls}`}>{m.icon}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-slate-700 truncate">{it.title}</p>
@@ -298,7 +307,8 @@ export default function Dashboard() {
         {dashCfg.category && <ChartCard title="📦 库存金额分布 TOP10" empty={productCategory.length === 0}>
           <ResponsiveContainer width="100%" height={240}>
             <PieChart>
-              <Pie data={productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false}>
+              <Pie data={productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false}
+                onClick={(entry: any) => { const name = entry?.name || entry?.payload?.name; if (name && name !== '暂无') window.dispatchEvent(new CustomEvent('erp:navigate', { detail: { type: 'table', tableKey: 'trade_inventory_balance', search: name } })); }} style={{ cursor: 'pointer' }}>
                 {(productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]).map((_: any, i: any) => <Cell key={i} fill={COLORS[i % COLORS.length]}/>)}
               </Pie>
               <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0' }}/>
