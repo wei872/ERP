@@ -11,6 +11,10 @@ export default function RecycleBinPage() {
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<any>(null);
   const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+
+  const toggleSel = (id: number) => setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggleAll = () => setSelected(prev => prev.size === rows.length ? new Set() : new Set(rows.map(r => Number(r.id))));
 
   const load = useCallback(async (kw: string) => {
     setLoading(true);
@@ -38,6 +42,17 @@ export default function RecycleBinPage() {
     try { return JSON.parse(row.row_data); } catch { return {}; }
   };
 
+  const doRestoreBatch = async () => {
+    if (selected.size === 0) { toastNotify('请先勾选要恢复的记录', 'warn'); return; }
+    if (!confirm(`批量恢复选中的 ${selected.size} 条记录？（各以新 ID 写入原表）`)) return;
+    try {
+      const r = await bizApi.restoreBatch(Array.from(selected));
+      toastNotify(`批量恢复完成：成功 ${r.data.ok} 条${r.data.fail ? `，失败 ${r.data.fail} 条` : ''}`);
+      setSelected(new Set());
+      load(search);
+    } catch (e: any) { toastNotify('批量恢复失败：' + (e.message || '')); }
+  };
+
   return (
     <div className="erp-fade-in p-6 space-y-5 max-w-[1300px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -51,16 +66,27 @@ export default function RecycleBinPage() {
         </div>
       </div>
 
+      {/* 批量操作条 */}
+      <div className="erp-card p-3 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer select-none">
+          <input type="checkbox" checked={rows.length > 0 && selected.size === rows.length} onChange={toggleAll} className="accent-indigo-600 w-4 h-4"/>
+          全选
+        </label>
+        <span className="text-xs text-slate-400">已选 <b className="text-indigo-600 tabular-nums">{selected.size}</b> 条</span>
+        <button onClick={doRestoreBatch} disabled={selected.size === 0} className="ml-auto px-4 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-lg text-xs font-semibold shadow-md disabled:opacity-40 disabled:cursor-not-allowed">♻️ 批量恢复选中</button>
+      </div>
+
       <div className="erp-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="erp-table">
-            <thead><tr><th>原表</th><th>原 ID</th><th>数据摘要</th><th>删除人</th><th>删除时间</th><th className="text-center">操作</th></tr></thead>
+            <thead><tr><th className="w-10"></th><th>原表</th><th>原 ID</th><th>数据摘要</th><th>删除人</th><th>删除时间</th><th className="text-center">操作</th></tr></thead>
             <tbody>
               {rows.map(r => {
                 const d = parseData(r);
                 const summary = Object.entries(d).filter(([k]) => k !== 'id').slice(0, 3).map(([k, v]) => `${k}=${v}`).join('，');
                 return (
                   <tr key={r.id}>
+                    <td className="w-10"><input type="checkbox" checked={selected.has(Number(r.id))} onChange={() => toggleSel(Number(r.id))} className="accent-indigo-600 w-4 h-4"/></td>
                     <td className="font-mono text-xs whitespace-nowrap text-indigo-600">{r.table_name}</td>
                     <td className="tabular-nums text-slate-500">#{r.row_id}</td>
                     <td className="max-w-[360px] truncate text-xs text-slate-600" title={summary}>{summary || '—'}</td>
@@ -74,7 +100,7 @@ export default function RecycleBinPage() {
                 );
               })}
               {rows.length === 0 && !loading && (
-                <tr><td colSpan={6} className="py-14 text-center">
+                <tr><td colSpan={7} className="py-14 text-center">
                   <div className="text-4xl mb-3">🗑️</div>
                   <p className="text-sm text-slate-400">{search ? `未找到匹配 "${search}" 的记录` : '回收站为空 —— 删除的数据都会安全地出现在这里'}</p>
                 </td></tr>

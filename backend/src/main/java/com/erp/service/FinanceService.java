@@ -12,6 +12,7 @@ import java.util.*;
 @Service
 public class FinanceService {
     @Autowired private JdbcTemplate db;
+    @Autowired private NoRuleService noRule;
 
     private static final Set<String> CREDIT_SUBJECTS = new HashSet<>(Arrays.asList(
         "2001","2201","2202","2203","2241","2501","2502","2701","4001","4002","4101","4103","4104","6001","6051","6301"
@@ -67,7 +68,9 @@ public class FinanceService {
     @Transactional
     public Map<String,Object> createVoucher(String voucherWord, String period, List<Map<String,Object>> lines, String preparedBy, String companyCode) throws Exception {
         if (lines == null || lines.isEmpty()) throw new RuntimeException("凭证明细不能为空");
-        String vn = "V-" + System.currentTimeMillis();
+        // 单据编号规则：优先取自定义规则（前缀+年月+流水），缺失时回退旧格式
+        String vn;
+        try { vn = noRule.nextNo("voucher"); } catch (Exception e) { vn = "V-" + System.currentTimeMillis(); }
         BigDecimal debitTotal = BigDecimal.ZERO, creditTotal = BigDecimal.ZERO;
         List<Object[]> detailBatch = new ArrayList<>();
         int lineNo = 0;

@@ -320,6 +320,28 @@ CREATE TABLE IF NOT EXISTS sys_print_template (
 INSERT IGNORE INTO sys_print_template(template_key, title, company_line, footer, fields_json, updated_by) VALUES
 ('statement', '客 户 对 账 单', '', '如有异议请于 7 个工作日内与我司财务部联系核对。', '["receivable_no","created_at","due_date","total_amount","received_amount","remain_amount","status"]', '系统');
 
+-- ── 单据编号规则（前缀 + yyyyMM + 流水，按月自动复位） ──
+CREATE TABLE IF NOT EXISTS sys_no_rule (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  rule_key VARCHAR(40) COMMENT '规则键',
+  rule_name VARCHAR(60) COMMENT '规则名称',
+  prefix VARCHAR(20) COMMENT '编号前缀',
+  seq_length INT DEFAULT 4 COMMENT '流水号位数',
+  current_seq INT DEFAULT 0 COMMENT '当前流水',
+  last_month VARCHAR(10) COMMENT '流水所属月份yyyyMM',
+  remark VARCHAR(200),
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_no_rule_key (rule_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_no_rule(rule_key, rule_name, prefix, seq_length, remark) VALUES
+('voucher', '手工凭证号', 'VZ-', 4, '格式：前缀+年月+流水，按月复位'),
+('sales', '销售订单号', 'SO-', 4, '格式：前缀+年月+流水，按月复位'),
+('purchase', '采购订单号', 'PO-', 4, '格式：前缀+年月+流水，按月复位');
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('sys_no_rule','单据编号规则','系统维护','编号规则',920);
+
 INSERT IGNORE INTO finance_voucher_template(template_name, description, lines_json, created_by) VALUES
 ('提现备用金', '从银行提取现金作为备用金（借:1001 库存现金 / 贷:1002 银行存款）',
  '[{"subject_code":"1001","subject_name":"库存现金","debit_amount":5000,"credit_amount":0,"summary":"提现备用金"},{"subject_code":"1002","subject_name":"银行存款","debit_amount":0,"credit_amount":5000,"summary":"提现备用金"}]', '系统'),

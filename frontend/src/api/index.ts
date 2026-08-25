@@ -116,6 +116,7 @@ export const bizApi = {
   attachmentList: (refTable: string, refNo: string) => request<any[]>(`/biz/attachment/list?ref_table=${encodeURIComponent(refTable)}&ref_no=${encodeURIComponent(refNo)}`),
   attachmentDownload: (id: number, filename: string) => downloadBlob(`/biz/attachment/download/${id}`, filename),
   attachmentDelete: (id: number) => request(`/biz/attachment/${id}`, { method: 'DELETE' }),
+  restoreBatch: (ids: number[]) => request<{ ok: number; fail: number }>('/biz/restore-batch', { method: 'POST', body: JSON.stringify({ ids }) }),
   messageRead: (msgKey: string) => request('/biz/message/read', { method: 'POST', body: JSON.stringify({ msg_key: msgKey }) }),
   messageReadList: () => request<string[]>('/biz/message/read-list'),
   reportSubList: () => request<any[]>('/biz/report-subscription'),
@@ -126,6 +127,9 @@ export const bizApi = {
   reportOutboxSend: (id: number) => request<string>(`/biz/report-outbox/send/${id}`, { method: 'POST' }),
   printTemplateGet: (key: string) => request<any>(`/biz/print-template/${encodeURIComponent(key)}`),
   printTemplateSave: (key: string, body: { title: string; company_line: string; footer: string; fields: string[] }) => request(`/biz/print-template/${encodeURIComponent(key)}`, { method: 'POST', body: JSON.stringify(body) }),
+  noRuleList: () => request<any[]>('/biz/no-rules'),
+  noRuleSave: (body: { rule_key: string; prefix: string; seq_length: number }) => request('/biz/no-rule', { method: 'POST', body: JSON.stringify(body) }),
+  noRuleReset: (key: string) => request(`/biz/no-rule/reset/${encodeURIComponent(key)}`, { method: 'POST' }),
   systemMonitor: () => request<any>('/biz/system-monitor'),
   backupSql: () => downloadBlob('/biz/backup', `erp_backup_${new Date().toISOString().slice(0, 10)}.sql`),
   importOrders: async (type: 'sales' | 'purchase', file: File) => {

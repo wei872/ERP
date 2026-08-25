@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { bizApi } from '../api';
 
 const money = (v: unknown) => {
@@ -86,6 +87,22 @@ export default function DailyReportPage() {
                   <div className={`h-full rounded-full transition-all duration-700 ${totRate >= 100 ? 'bg-gradient-to-r from-emerald-400 to-teal-500' : 'bg-gradient-to-r from-indigo-400 to-violet-500'}`} style={{ width: `${Math.min(100, totRate)}%` }}></div>
                 </div>
               </div>
+              {/* 目标-实际对比图 */}
+              {(targetData.rows || []).some((r: any) => Number(r.target) > 0) && (
+                <div className="pt-1">
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={(targetData.rows || []).filter((r: any) => Number(r.target) > 0).map((r: any) => ({ name: r.salesperson, 目标: Number(r.target) || 0, 实际: Number(r.actual) || 0 }))} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} tickFormatter={(v: number) => money(v)} />
+                      <Tooltip formatter={(v: any, n: any) => [`¥${Number(v).toLocaleString()}`, n]} contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="目标" fill="#c7d2fe" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                      <Bar dataKey="实际" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={34} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
                 {(targetData.rows || []).map((r: any) => {
                   const rate = Number(r.rate) || 0;

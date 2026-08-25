@@ -34,6 +34,7 @@ public class BizController {
     @Autowired private AuditService audit;
     @Autowired private BatchService batchService;
     @Autowired private ReportMailService reportMail;
+    @Autowired private NoRuleService noRule;
     @Autowired private FinanceTemplateService fin;
     @Autowired private ReconciliationService reconciliation;
     @Autowired private FinanceService finance;
@@ -597,7 +598,8 @@ public class BizController {
             Map<String,Object> q = rows.get(0);
             String st = String.valueOf(q.get("audit_status"));
             if (!"已通过".equals(st)) return Result.error("仅「已通过」的报价单可转订单，当前状态：" + st);
-            String salesNo = "SO-Q-" + System.currentTimeMillis();
+            String salesNo;
+            try { salesNo = noRule.nextNo("sales"); } catch (Exception e) { salesNo = "SO-Q-" + System.currentTimeMillis(); }
             java.math.BigDecimal qty = new java.math.BigDecimal(String.valueOf(q.getOrDefault("qty", "1")));
             java.math.BigDecimal price = new java.math.BigDecimal(String.valueOf(q.getOrDefault("quote_price", "0")));
             java.math.BigDecimal amount = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
@@ -782,6 +784,50 @@ public class BizController {
         } catch (Exception e) { return Result.error("恢复失败: " + e.getMessage()); }
     }
 
+    // ── 回收站批量恢复 ──
+    @PostMapping("/restore-batch")
+    @SuppressWarnings("unchecked")
+    public Result restoreBatch(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        Object idsObj = body.get("ids");
+        if (!(idsObj instanceof List) || ((List<?>) idsObj).isEmpty()) return Result.error("请选择要恢复的记录");
+        int ok = 0, fail = 0;
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+        for (Object idObj : (List<?>) idsObj) {
+            long bid;
+            try { bid = Long.parseLong(String.valueOf(idObj)); } catch (Exception e) { fail++; continue; }
+            try {
+                List<Map<String,Object>> rows = db.queryForList("SELECT * FROM sys_deleted_backup WHERE id=?", bid);
+                if (rows.isEmpty()) { fail++; continue; }
+                String table = String.valueOf(rows.get(0).get("table_name"));
+                if (!table.matches("^[a-z][a-z0-9_]{2,60}$")) { fail++; continue; }
+                Map<String,Object> data = om.readValue(String.valueOf(rows.get(0).get("row_data")), Map.class);
+                data.remove("id");
+                if (data.isEmpty()) { fail++; continue; }
+                StringBuilder sb = new StringBuilder("INSERT INTO " + table + " ("), vb = new StringBuilder(" VALUES (");
+                List<Object> params = new ArrayList<>();
+                boolean first = true;
+                for (Map.Entry<String,Object> e : data.entrySet()) {
+                    String k = e.getKey();
+                    if (!k.matches("^[a-zA-Z_][a-zA-Z0-9_]{0,60}$")) continue;
+                    if (!first) { sb.append(","); vb.append(","); }
+                    sb.append("`").append(k).append("`");
+                    vb.append("?");
+                    params.add(e.getValue());
+                    first = false;
+                }
+                sb.append(")").append(vb.append(")"));
+                db.update(sb.toString(), params.toArray());
+                db.update("DELETE FROM sys_deleted_backup WHERE id=?", bid);
+                ok++;
+            } catch (Exception e) { fail++; }
+        }
+        audit.log(user(req), "系统", "回收站批量恢复", "成功" + ok + "/失败" + fail, audit.getIp(req));
+        Map<String,Object> ret = new LinkedHashMap<>();
+        ret.put("ok", ok);
+        ret.put("fail", fail);
+        return Result.ok(ret);
+    }
+
     // ── 多公司主数据 ──
     @GetMapping("/companies") public Result companies() {
         try { return Result.ok(db.queryForList("SELECT * FROM sys_company WHERE status='启用' ORDER BY is_default DESC, id")); }
@@ -804,7 +850,8 @@ public class BizController {
             }
             List<String> poNos = new ArrayList<>();
             for (Map.Entry<String, List<Map<String,Object>>> e : bySupplier.entrySet()) {
-                String poNo = "PO-SUG-" + System.currentTimeMillis() + "-" + (poNos.size() + 1);
+                String poNo;
+                try { poNo = noRule.nextNo("purchase"); } catch (Exception e) { poNo = "PO-SUG-" + System.currentTimeMillis() + "-" + (poNos.size() + 1); }
                 java.math.BigDecimal total = java.math.BigDecimal.ZERO;
                 List<Object[]> lines = new ArrayList<>();
                 int lineNo = 0;
@@ -1551,6 +1598,41 @@ public class BizController {
             audit.log(user(req), "打印", "保存打印模板", key, audit.getIp(req));
             return Result.ok("模板已保存");
         } catch (Exception e) { return Result.error("保存失败: " + e.getMessage()); }
+    }
+
+    // ── 单据编号规则管理 ──
+    @GetMapping("/no-rules")
+    public Result noRuleList(HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        try { return Result.ok(db.queryForList("SELECT * FROM sys_no_rule ORDER BY id")); }
+        catch (Exception e) { return Result.ok(new ArrayList<>()); }
+    }
+
+    @PostMapping("/no-rule")
+    public Result noRuleSave(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        try {
+            String key = String.valueOf(body.getOrDefault("rule_key", ""));
+            String prefix = String.valueOf(body.getOrDefault("prefix", ""));
+            int len = body.get("seq_length") == null ? 4 : Integer.parseInt(String.valueOf(body.get("seq_length")));
+            if (key.isEmpty()) return Result.error("规则键不能为空");
+            if (prefix.isEmpty() || prefix.length() > 20) return Result.error("前缀须为 1-20 个字符");
+            if (len < 2 || len > 8) return Result.error("流水位数须在 2-8 之间");
+            int n = db.update("UPDATE sys_no_rule SET prefix=?, seq_length=? WHERE rule_key=?", prefix, len, key);
+            if (n == 0) db.update("INSERT INTO sys_no_rule(rule_key,rule_name,prefix,seq_length) VALUES(?,?,?,?)", key, key, prefix, len);
+            audit.log(user(req), "编号", "修改编号规则", key + "->" + prefix, audit.getIp(req));
+            return Result.ok("规则已保存");
+        } catch (Exception e) { return Result.error("保存失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/no-rule/reset/{key}")
+    public Result noRuleReset(@PathVariable String key, HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        try {
+            int n = db.update("UPDATE sys_no_rule SET current_seq=0, last_month='' WHERE rule_key=?", key);
+            if (n > 0) audit.log(user(req), "编号", "重置流水", key, audit.getIp(req));
+            return n > 0 ? Result.ok("流水已重置") : Result.error("规则不存在");
+        } catch (Exception e) { return Result.error("重置失败: " + e.getMessage()); }
     }
 
     // ── 销售目标达成率 ──

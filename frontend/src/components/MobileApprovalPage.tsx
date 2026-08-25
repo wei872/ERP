@@ -1,17 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { bizApi } from '../api';
 import { toastNotify } from '../utils/toast';
 
 const TYPE_ICON: Record<string, string> = { '采购审批': '🛒', '费用审批': '💸', '请假审批': '🏖️' };
 const FILTERS = ['全部', '采购审批', '费用审批', '请假审批'] as const;
+const SWIPE_THRESHOLD = 72; // 滑动超过该距离触发审批
 
-/** 移动端审批中心：大按钮卡片式审批，手机上单手完成通过/驳回 */
+/** 移动端审批中心：大按钮卡片式审批 + 滑动手势（右滑通过 / 左滑驳回） */
 export default function MobileApprovalPage() {
   const [tasks, setTasks] = useState<any[]>([]);
   const [filter, setFilter] = useState<string>('全部');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState('');
   const [expanded, setExpanded] = useState('');
+  // 滑动手势状态
+  const [swipe, setSwipe] = useState<{ key: string; x: number } | null>(null);
+  const touchStart = useRef<{ key: string; x: number; y: number } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,8 +78,32 @@ export default function MobileApprovalPage() {
           <p className="text-slate-500 text-sm">太棒了，没有待办审批</p>
         </div>
       )}
-      {shown.map(t => (
-        <div key={t.task_no} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3">
+      {shown.length > 0 && (
+        <p className="text-center text-[11px] text-slate-400 -mt-1">💡 提示：卡片右滑通过、左滑驳回</p>
+      )}
+      {shown.map(t => {
+        const swiping = swipe && swipe.key === t.task_no ? swipe.x : 0;
+        return (
+        <div key={t.task_no}
+          onTouchStart={e => { touchStart.current = { key: t.task_no, x: e.touches[0].clientX, y: e.touches[0].clientY }; }}
+          onTouchMove={e => {
+            const ts = touchStart.current;
+            if (!ts || ts.key !== t.task_no) return;
+            const dx = e.touches[0].clientX - ts.x;
+            const dy = e.touches[0].clientY - ts.y;
+            if (Math.abs(dx) > Math.abs(dy)) setSwipe({ key: t.task_no, x: Math.max(-160, Math.min(160, dx)) });
+          }}
+          onTouchEnd={() => {
+            const s = swipe;
+            touchStart.current = null;
+            if (s && s.key === t.task_no) {
+              if (s.x >= SWIPE_THRESHOLD) { doApprove(t.instance_no); }
+              else if (s.x <= -SWIPE_THRESHOLD) { doReject(t.instance_no); }
+            }
+            setSwipe(null);
+          }}
+          style={{ transform: swiping ? `translateX(${swiping}px)` : undefined, transition: swipe?.key === t.task_no ? 'none' : 'transform .25s', background: swiping > 40 ? 'rgba(16,185,129,0.08)' : swiping < -40 ? 'rgba(239,68,68,0.08)' : undefined }}
+          className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 space-y-3 touch-pan-y">
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
               <span className="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-base shrink-0">{TYPE_ICON[t.approval_type] || '🔁'}</span>
@@ -101,7 +129,8 @@ export default function MobileApprovalPage() {
               className="py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-sm font-semibold shadow-md hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50">✓ 通过</button>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

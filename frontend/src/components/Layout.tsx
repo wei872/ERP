@@ -34,6 +34,7 @@ const DataImportPage = lazy(() => import('./DataImportPage'));
 const SystemMonitorPage = lazy(() => import('./SystemMonitorPage'));
 const MessageCenterPage = lazy(() => import('./MessageCenterPage'));
 const ReportSubscriptionPage = lazy(() => import('./ReportSubscriptionPage'));
+const NoRulePage = lazy(() => import('./NoRulePage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -43,7 +44,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -102,6 +103,7 @@ export default function Layout() {
     { label: '日志高级检索', icon: '🔎', page: { type: 'auditsearch' } },
     { label: '消息中心', icon: '📬', page: { type: 'messages' } },
     { label: '报表邮件订阅', icon: '📮', page: { type: 'reportsub' } },
+    { label: '单据编号规则', icon: '🔢', page: { type: 'norule' } },
     { label: '报表中心', icon: '📈', page: { type: 'report' } },
     { label: '工作流审批', icon: '🔁', page: { type: 'workflow' } },
     { label: '会计凭证', icon: '📒', page: { type: 'voucher' } },
@@ -253,6 +255,7 @@ export default function Layout() {
     if (page.type === 'auditsearch') return '🔎 操作日志高级检索';
     if (page.type === 'messages') return '📬 消息中心';
     if (page.type === 'reportsub') return '📮 报表邮件订阅';
+    if (page.type === 'norule') return '🔢 单据编号规则';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -453,6 +456,7 @@ export default function Layout() {
         {page.type === 'auditsearch' && <AuditLogSearchPage />}
         {page.type === 'messages' && <MessageCenterPage />}
         {page.type === 'reportsub' && <ReportSubscriptionPage />}
+        {page.type === 'norule' && <NoRulePage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
