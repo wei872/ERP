@@ -51,6 +51,7 @@ public class NoRuleService {
         if ("purchase".equals(ruleKey)) return "PO-";
         if ("stockcheck".equals(ruleKey)) return "PD-";
         if ("commission".equals(ruleKey)) return "TC-";
+        if ("ncr".equals(ruleKey)) return "NCR-";
         return "DOC-";
     }
 

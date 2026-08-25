@@ -408,19 +408,22 @@ insert('prod_bom_structure', ['parent_code', 'component_code', 'product_code', '
     [q(fg), q(c), q(c), q(gmap[c][1]), q(gmap[c][3]), q('1'), q4(per), money(gmap[c][5]), q(gmap[c][4]), q4(0.01)])));
 
 // ── 销售 ──
-insert('trade_sales_main', ['sales_no', 'customer_code', 'customer_name', 'sales_date', 'total_amount', 'sales_person', 'sales_status', 'shipping_status', 'warehouse', 'remark'],
+// 合同关联（v5.27）：客户/供应商与合同对方同名即挂接合同号（合同执行跟踪页数据源）
+const SALES_CONTRACT = { '华东智能制造有限公司': 'CT-2026-001', '南方物联科技公司': 'CT-2026-002', '长江智慧能源公司': 'CT-2026-003', '沿海港口设备公司': 'CT-2026-004', '中原农机股份公司': 'CT-2025-018' };
+const PURCHASE_CONTRACT = { '深圳芯联电子公司': 'CT-2026-005', '苏州光电科技公司': 'CT-2026-006', '佛山包装材料厂': 'CT-2025-015' };
+insert('trade_sales_main', ['sales_no', 'customer_code', 'customer_name', 'sales_date', 'total_amount', 'sales_person', 'sales_status', 'shipping_status', 'warehouse', 'contract_no', 'remark'],
   sales.map(s => {
     const total = s.lines.reduce((t, l) => t + l.qty * l.price, 0);
-    return [q(s.no), q(customers[s.custIdx][0]), q(customers[s.custIdx][1]), dAgo(s.m * 30 + s.day), money(total), q(s.person), q(s.status), q(s.ship), q(WH_FG), q('')];
+    return [q(s.no), q(customers[s.custIdx][0]), q(customers[s.custIdx][1]), dAgo(s.m * 30 + s.day), money(total), q(s.person), q(s.status), q(s.ship), q(WH_FG), q(SALES_CONTRACT[customers[s.custIdx][1]] || ''), q('')];
   }));
 insert('trade_sales_detail', ['sales_no', 'line_no', 'product_code', 'product_name', 'spec_model', 'qty', 'unit', 'unit_price', 'amount', 'delivery_date'],
   sales.flatMap(s => s.lines.map((l, i) => [q(s.no), i + 1, q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.qty), q(gmap[l.code][4]), money(l.price), money(l.qty * l.price), dAgo(Math.max(0, s.m * 30 + s.day - 2))])));
 
 // ── 采购 ──
-insert('trade_purchase_main', ['purchase_no', 'supplier_code', 'supplier_name', 'purchase_date', 'total_amount', 'buyer', 'purchase_status', 'arrival_status', 'warehouse', 'remark'],
+insert('trade_purchase_main', ['purchase_no', 'supplier_code', 'supplier_name', 'purchase_date', 'total_amount', 'buyer', 'purchase_status', 'arrival_status', 'warehouse', 'contract_no', 'remark'],
   purchases.map(p => {
     const total = p.lines.reduce((t, l) => t + l.qty * l.price, 0);
-    return [q(p.no), q(suppliers[p.suppIdx][0]), q(suppliers[p.suppIdx][1]), dAgo(p.m * 30 + p.day), money(total), q(p.buyer), q(p.status), q(p.arrival), q(WH_RAW), q('')];
+    return [q(p.no), q(suppliers[p.suppIdx][0]), q(suppliers[p.suppIdx][1]), dAgo(p.m * 30 + p.day), money(total), q(p.buyer), q(p.status), q(p.arrival), q(WH_RAW), q(PURCHASE_CONTRACT[suppliers[p.suppIdx][1]] || ''), q('')];
   }));
 insert('trade_purchase_detail', ['purchase_no', 'line_no', 'product_code', 'product_name', 'spec_model', 'qty', 'unit', 'unit_price', 'amount', 'recv_qty'],
   purchases.flatMap(p => p.lines.map((l, i) => [q(p.no), i + 1, q(l.code), q(gmap[l.code][1]), q(gmap[l.code][3]), q4(l.qty), q(gmap[l.code][4]), money(l.price), money(l.qty * l.price), p.status === '已入库' ? q4(l.qty) : q4(0)])));
@@ -662,6 +665,17 @@ insert('quality_inspection_main', ['inspection_no', 'inspection_type', 'product_
   qcs.map((c, i) => [q(`QC-${pad(i + 1, 4)}`), q(c.type), q(c.code), q(gmap[c.code][1]), q(`B${pad(i + 1, 5)}`), c.sample, c.pass, c.sample - c.pass, q(c.result), q(c.inspector), dAgo(c.m * 30 + c.day), q('已完成')]));
 insert('trade_delivery_main', ['delivery_no', 'ref_sales_no', 'customer_code', 'customer_name', 'delivery_date', 'warehouse', 'logistics', 'tracking_no', 'handler', 'status'],
   deliveries.map(d => [q(d.no), q(d.sale.no), q(customers[d.sale.custIdx][0]), q(customers[d.sale.custIdx][1]), dAgo(d.m * 30 + d.day), q(WH_FG), q(d.logistics), q(d.track), q('李四'), q(d.status)]));
+
+// ── 质量异常闭环 NCR（v5.27）：四种流程状态各一条样例 ──
+{
+  const codes = Object.keys(gmap);
+  insert('quality_ncr', ['ncr_no', 'title', 'source', 'product_code', 'product_name', 'batch_no', 'qty', 'severity', 'status', 'handler', 'handling', 'handle_note', 'recheck_result', 'recheck_note', 'frozen', 'reporter', 'report_date', 'closed_at', 'remark'], [
+    ['NCR-0001', '来料引脚氧化，可焊性不良', '来料检验', codes[0], q(gmap[codes[0]][1]), q('B00003'), '120', q('致命'), q('待处置'), 'NULL', 'NULL', 'NULL', 'NULL', 'NULL', q('否'), q('王五'), dAgo(2), 'NULL', q('抽检 200 件发现 120 件引脚氧化，已隔离待处理')],
+    ['NCR-0002', 'SMT 焊点虚焊批量异常', '过程检验', codes[1], q(gmap[codes[1]][1]), q('B00005'), '60', q('严重'), q('处置中'), q('王五'), q('返工'), q('首次返工完成，炉温曲线已修正'), q('不合格'), q('复检仍有 4 件虚焊，退回重新处置'), q('否'), q('王五'), dAgo(5), 'NULL', q('复判：回流焊温区设置偏差')],
+    ['NCR-0003', '外壳划伤（出货检验发现）', '出货检验', codes[2], q(gmap[codes[2]][1]), q('B00007'), '25', q('一般'), q('待复检'), q('王五'), q('返工'), q('抛光返工完成，待复检确认'), 'NULL', 'NULL', q('否'), q('李四'), dAgo(8), 'NULL', q('包装前转运磕碰，已加装防护隔层')],
+    ['NCR-0004', '客户反馈说明书版本不符', '客户投诉', codes[3 % codes.length], q(gmap[codes[3 % codes.length]][1]), 'NULL', '3', q('轻微'), q('已关闭'), q('王五'), q('让步接收'), q('客户确认旧版可继续使用，让步放行'), q('让步放行'), q('让步接收，免复检直接放行'), q('否'), q('李四'), dAgo(12), 'DATE_SUB(NOW(), INTERVAL 10 DAY)', q('已同步更新版式，下批次生效')],
+  ].map(r => [q(r[0]), q(r[1]), q(r[2]), q(r[3]), r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15], r[16], r[17], r[18]]));
+}
 
 // ── 审批流 ──
 const apMainRows = [], apInstRows = [], apTaskRows = [], apLogRows = [];

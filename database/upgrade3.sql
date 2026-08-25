@@ -379,6 +379,53 @@ INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('trade_sales_main','shipping_status','doc.status');
 
+-- ── 合同执行跟踪（v5.27）：销售/采购单关联合同号 ──
+SET @c10 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='trade_sales_main' AND column_name='contract_no');
+SET @s10 = IF(@c10=0, 'ALTER TABLE trade_sales_main ADD COLUMN contract_no VARCHAR(50) COMMENT ''关联合同号''', 'SELECT 1'); PREPARE st10 FROM @s10; EXECUTE st10; DEALLOCATE PREPARE st10;
+SET @c11 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='trade_purchase_main' AND column_name='contract_no');
+SET @s11 = IF(@c11=0, 'ALTER TABLE trade_purchase_main ADD COLUMN contract_no VARCHAR(50) COMMENT ''关联合同号''', 'SELECT 1'); PREPARE st11 FROM @s11; EXECUTE st11; DEALLOCATE PREPARE st11;
+
+-- ── 质量异常闭环 NCR（v5.27）：发起 → 处置 → 复检 → 关闭，联动库存冻结与批次追溯 ──
+CREATE TABLE IF NOT EXISTS quality_ncr (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  ncr_no VARCHAR(50) COMMENT '异常单号',
+  title VARCHAR(200) COMMENT '异常标题',
+  source VARCHAR(30) COMMENT '来料检验/过程检验/出货检验/客户投诉',
+  product_code VARCHAR(50) COMMENT '涉及商品编码',
+  product_name VARCHAR(100) COMMENT '涉及商品名称',
+  batch_no VARCHAR(50) COMMENT '涉及批次（联动批次追溯）',
+  qty DECIMAL(18,4) COMMENT '异常数量',
+  severity VARCHAR(20) COMMENT '轻微/一般/严重/致命',
+  status VARCHAR(20) DEFAULT '待处置' COMMENT '待处置/处置中/待复检/已关闭',
+  handler VARCHAR(50) COMMENT '处置人',
+  handling VARCHAR(20) COMMENT '让步接收/返工/报废/退货',
+  handle_note TEXT COMMENT '处置说明',
+  recheck_result VARCHAR(20) COMMENT '复检结论：合格/不合格',
+  recheck_note TEXT COMMENT '复检说明',
+  frozen VARCHAR(10) DEFAULT '否' COMMENT '是否冻结批次库存',
+  reporter VARCHAR(50) COMMENT '发起人',
+  report_date DATE,
+  closed_at DATETIME COMMENT '关闭时间',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('quality_ncr','质量异常单(NCR)','生产管理','质量管理',931);
+
+INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_no) VALUES
+('ncr.status','待处置','待处置','orange',1),
+('ncr.status','处置中','处置中','blue',2),
+('ncr.status','待复检','待复检','violet',3),
+('ncr.status','已关闭','已关闭','green',4),
+('doc.status','已冻结','已冻结','red',43);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('quality_ncr','status','ncr.status');
+
+INSERT IGNORE INTO sys_no_rule(rule_key, rule_name, prefix, seq_length, remark) VALUES
+('ncr', '质量异常单号', 'NCR-', 4, '格式：前缀+年月+流水，按月复位');
+
 -- ── 销售提成（v5.26）：按目标达成率阶梯计提，审批后联动工资表 ──
 CREATE TABLE IF NOT EXISTS hr_sales_commission (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

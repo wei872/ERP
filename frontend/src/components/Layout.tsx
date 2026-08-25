@@ -38,6 +38,8 @@ const NoRulePage = lazy(() => import('./NoRulePage'));
 const StocktakeAnalysisPage = lazy(() => import('./StocktakeAnalysisPage'));
 const PriceComparePage = lazy(() => import('./PriceComparePage'));
 const CommissionPage = lazy(() => import('./CommissionPage'));
+const ContractTrackingPage = lazy(() => import('./ContractTrackingPage'));
+const NcrPage = lazy(() => import('./NcrPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -47,13 +49,15 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'workflow',       label: '工作流审批',   icon: '🔁', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'mapproval',      label: '移动审批',     icon: '📱', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'tracking',       label: '销售执行跟踪', icon: '🚚', roles: ['admin','sales','accounting'] },
+  { type: 'contracttrack',  label: '合同执行跟踪', icon: '📑', roles: ['admin','sales','procurement','accounting'] },
+  { type: 'ncr',            label: '质量异常闭环', icon: '🚨', roles: ['admin','production','warehouse'] },
   { type: 'import',         label: '数据导入中心', icon: '⬆️', roles: ['admin','sales','procurement'] },
   { type: 'ptracking',      label: '采购执行跟踪', icon: '🛒', roles: ['admin','procurement','accounting'] },
   { type: 'invanalysis',    label: '库存周转分析', icon: '🔄', roles: ['admin','warehouse','accounting'] },
@@ -113,6 +117,8 @@ export default function Layout() {
     { label: '盘点盈亏分析', icon: '📦', page: { type: 'stocktakeanalysis' } },
     { label: '采购比价评级', icon: '⚖️', page: { type: 'pricecompare' } },
     { label: '销售提成计算', icon: '💎', page: { type: 'commission' } },
+    { label: '合同执行跟踪', icon: '📑', page: { type: 'contracttrack' } },
+    { label: '质量异常闭环', icon: '🚨', page: { type: 'ncr' } },
     { label: '报表中心', icon: '📈', page: { type: 'report' } },
     { label: '工作流审批', icon: '🔁', page: { type: 'workflow' } },
     { label: '会计凭证', icon: '📒', page: { type: 'voucher' } },
@@ -469,6 +475,8 @@ export default function Layout() {
         {page.type === 'stocktakeanalysis' && <StocktakeAnalysisPage />}
         {page.type === 'pricecompare' && <PriceComparePage />}
         {page.type === 'commission' && <CommissionPage />}
+        {page.type === 'contracttrack' && <ContractTrackingPage />}
+        {page.type === 'ncr' && <NcrPage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}

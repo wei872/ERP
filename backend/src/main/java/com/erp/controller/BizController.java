@@ -387,6 +387,13 @@ public class BizController {
             ovP.put("amount", db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_payable_main WHERE remain_amount>0 AND due_date<CURDATE()", java.math.BigDecimal.class));
             ret.put("overduePayable", ovP);
             if (isAdmin) ret.put("pendingUsers", db.queryForObject("SELECT COUNT(*) FROM sys_user WHERE status='pending'", Long.class));
+            // 合同到期提醒（v5.27）：30 天内到期 + 已过期未完结
+            try {
+                Map<String,Object> cts = new LinkedHashMap<>();
+                cts.put("expiring", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status IN ('执行中','草稿') AND end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)", Long.class));
+                cts.put("expired", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status='执行中' AND end_date<CURDATE()", Long.class));
+                ret.put("expiringContracts", cts);
+            } catch (Exception ignored) {}
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("待办加载失败: " + e.getMessage()); }
     }
@@ -1075,6 +1082,182 @@ public class BizController {
     private java.math.BigDecimal bd(Object v) {
         if (v == null) return java.math.BigDecimal.ZERO;
         try { return new java.math.BigDecimal(v.toString()); } catch (Exception e) { return java.math.BigDecimal.ZERO; }
+    }
+
+    // ── 合同执行跟踪（v5.27）：合同 ↔ 订单 ↔ 收付款 三单关联 + 到期预警 ──
+    @GetMapping("/contract-tracking") public Result contractTracking() {
+        try {
+            List<Map<String,Object>> contracts = db.queryForList("SELECT * FROM cust_contract_main ORDER BY end_date ASC LIMIT 200");
+            List<Map<String,Object>> rows = new ArrayList<>();
+            java.math.BigDecimal totAmount = java.math.BigDecimal.ZERO, totOrdered = java.math.BigDecimal.ZERO;
+            int inProgress = 0, finished = 0, expiring = 0, expired = 0;
+            for (Map<String,Object> c : contracts) {
+                String no = String.valueOf(c.get("contract_no"));
+                String type = String.valueOf(c.getOrDefault("contract_type", ""));
+                boolean isSales = type.contains("销售");
+                Map<String,Object> row = new LinkedHashMap<>(c);
+                List<Map<String,Object>> orders;
+                java.math.BigDecimal ordered = java.math.BigDecimal.ZERO, deliveredAmt = java.math.BigDecimal.ZERO, settled = java.math.BigDecimal.ZERO;
+                if (isSales) {
+                    orders = db.queryForList("SELECT sales_no doc_no, sales_date doc_date, total_amount, sales_status doc_status, shipping_status ship FROM trade_sales_main WHERE contract_no=? ORDER BY sales_date DESC", no);
+                    for (Map<String,Object> o : orders) {
+                        ordered = ordered.add(bd(o.get("total_amount")));
+                        if ("已出库".equals(String.valueOf(o.get("ship")))) deliveredAmt = deliveredAmt.add(bd(o.get("total_amount")));
+                    }
+                    if (!orders.isEmpty()) {
+                        settled = db.queryForObject("SELECT COALESCE(SUM(r.received_amount),0) FROM finance_receivable_main r JOIN trade_sales_main s ON r.remark LIKE CONCAT('%', s.sales_no, '%') WHERE s.contract_no=?", java.math.BigDecimal.class, no);
+                        if (settled == null) settled = java.math.BigDecimal.ZERO;
+                    }
+                } else {
+                    orders = db.queryForList("SELECT purchase_no doc_no, purchase_date doc_date, total_amount, purchase_status doc_status, arrival_status ship FROM trade_purchase_main WHERE contract_no=? ORDER BY purchase_date DESC", no);
+                    for (Map<String,Object> o : orders) {
+                        ordered = ordered.add(bd(o.get("total_amount")));
+                        if ("已入库".equals(String.valueOf(o.get("ship")))) deliveredAmt = deliveredAmt.add(bd(o.get("total_amount")));
+                    }
+                    if (!orders.isEmpty()) {
+                        settled = db.queryForObject("SELECT COALESCE(SUM(p.paid_amount),0) FROM finance_payable_main p JOIN trade_purchase_main m ON p.remark LIKE CONCAT('%', m.purchase_no, '%') WHERE m.contract_no=?", java.math.BigDecimal.class, no);
+                        if (settled == null) settled = java.math.BigDecimal.ZERO;
+                    }
+                }
+                java.math.BigDecimal amount = bd(c.get("amount"));
+                row.put("order_count", orders.size());
+                row.put("ordered_amount", ordered);
+                row.put("delivered_amount", deliveredAmt);
+                row.put("settled_amount", settled);
+                row.put("exec_rate", amount.signum() > 0 ? ordered.multiply(new java.math.BigDecimal("100")).divide(amount, 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+                row.put("settle_rate", ordered.signum() > 0 ? settled.multiply(new java.math.BigDecimal("100")).divide(ordered, 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+                // 到期状态
+                long daysLeft = 0;
+                Object endObj = c.get("end_date");
+                if (endObj != null) {
+                    try {
+                        java.time.LocalDate end = java.time.LocalDate.parse(String.valueOf(endObj).substring(0, 10));
+                        daysLeft = java.time.temporal.ChronoUnit.DAYS.between(java.time.LocalDate.now(), end);
+                    } catch (Exception ignored) {}
+                }
+                row.put("days_left", daysLeft);
+                String cStatus = String.valueOf(c.getOrDefault("status", ""));
+                if ("执行中".equals(cStatus)) {
+                    inProgress++;
+                    if (daysLeft < 0) expired++;
+                    else if (daysLeft <= 30) expiring++;
+                } else if ("已完结".equals(cStatus)) finished++;
+                totAmount = totAmount.add(amount);
+                totOrdered = totOrdered.add(ordered);
+                row.put("orders", orders);
+                rows.add(row);
+            }
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("count", rows.size());
+            totals.put("amount", totAmount);
+            totals.put("ordered", totOrdered);
+            totals.put("in_progress", inProgress);
+            totals.put("finished", finished);
+            totals.put("expiring", expiring);
+            totals.put("expired", expired);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", rows); ret.put("totals", totals);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("合同跟踪加载失败: " + e.getMessage()); }
+    }
+
+    // ── 质量异常闭环 NCR（v5.27）：发起 → 处置 → 复检 → 关闭，联动批次冻结/出库 ──
+    @GetMapping("/ncr/list") public Result ncrList() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", db.queryForList("SELECT * FROM quality_ncr ORDER BY id DESC LIMIT 200"));
+            ret.put("summary", db.queryForList("SELECT status, COUNT(*) cnt FROM quality_ncr GROUP BY status"));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("质量异常加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/ncr/create") public Result ncrCreate(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"production".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
+        try {
+            String title = String.valueOf(body.getOrDefault("title", "")).trim();
+            String source = String.valueOf(body.getOrDefault("source", "过程检验"));
+            String productCode = String.valueOf(body.getOrDefault("product_code", "")).trim();
+            String batchNo = String.valueOf(body.getOrDefault("batch_no", "")).trim();
+            java.math.BigDecimal qty = body.get("qty") == null ? java.math.BigDecimal.ONE : new java.math.BigDecimal(String.valueOf(body.get("qty")));
+            String severity = String.valueOf(body.getOrDefault("severity", "一般"));
+            if (title.isEmpty() || productCode.isEmpty()) return Result.error("异常标题与商品编码必填");
+            if (qty.signum() <= 0) return Result.error("异常数量必须大于 0");
+            String pName = "";
+            try {
+                List<Map<String,Object>> g = db.queryForList("SELECT product_name FROM trade_goods_main WHERE product_code=? LIMIT 1", productCode);
+                if (!g.isEmpty()) pName = String.valueOf(g.get(0).get("product_name"));
+            } catch (Exception ignored) {}
+            String ncrNo;
+            try { ncrNo = noRule.nextNo("ncr"); } catch (Exception e) { ncrNo = "NCR-" + System.currentTimeMillis(); }
+            boolean freeze = "true".equalsIgnoreCase(String.valueOf(body.getOrDefault("freeze", "false"))) && !batchNo.isEmpty();
+            db.update("INSERT INTO quality_ncr(ncr_no,title,source,product_code,product_name,batch_no,qty,severity,status,frozen,reporter,report_date,remark) VALUES(?,?,?,?,?,?,?,?, '待处置', ?,?,CURDATE(),?)",
+                ncrNo, title, source, productCode, pName, batchNo, qty, severity, freeze ? "是" : "否", user(req), String.valueOf(body.getOrDefault("remark", "")));
+            // 库存冻结：批次状态置「已冻结」，阻断领料/出库
+            if (freeze) {
+                int n = db.update("UPDATE trade_batch_trace SET status='已冻结' WHERE batch_no=? AND status='在库'", batchNo);
+                if (n == 0) return Result.error("异常单已创建（" + ncrNo + "），但批次 " + batchNo + " 不存在或不在库，冻结未生效");
+            }
+            audit.log(user(req), "质量", "NCR发起", ncrNo + " " + productCode + " ×" + qty + " " + severity + (freeze ? " 已冻结批次" + batchNo : ""), audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("ncr_no", ncrNo); ret.put("frozen", freeze);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("NCR 发起失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/ncr/handle/{id}")
+    @Transactional
+    public Result ncrHandle(@PathVariable Long id, @RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"production".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT * FROM quality_ncr WHERE id=?", id);
+            if (rows.isEmpty()) return Result.error("异常单不存在");
+            Map<String,Object> n = rows.get(0);
+            if (!"待处置".equals(String.valueOf(n.get("status"))) && !"处置中".equals(String.valueOf(n.get("status"))))
+                return Result.error("当前状态「" + n.get("status") + "」不可处置");
+            String handling = String.valueOf(body.getOrDefault("handling", ""));
+            if (!"让步接收".equals(handling) && !"返工".equals(handling) && !"报废".equals(handling) && !"退货".equals(handling))
+                return Result.error("处置方式须为：让步接收 / 返工 / 报废 / 退货");
+            String note = String.valueOf(body.getOrDefault("handle_note", ""));
+            java.math.BigDecimal qty = bd(n.get("qty"));
+            // 报废：联动库存出库（硬失败回滚），出库流水可追溯到 NCR 单
+            if ("报废".equals(handling) && qty.signum() > 0) {
+                inventory.stockOut(String.valueOf(n.get("product_code")), String.valueOf(body.getOrDefault("warehouse", "默认仓")), qty, String.valueOf(n.get("ncr_no")));
+            }
+            if ("让步接收".equals(handling)) {
+                db.update("UPDATE quality_ncr SET status='已关闭', handling=?, handle_note=?, handler=?, recheck_result='让步放行', recheck_note=?, closed_at=NOW() WHERE id=?",
+                    handling, note, user(req), "让步接收，免复检直接放行", id);
+            } else {
+                db.update("UPDATE quality_ncr SET status='待复检', handling=?, handle_note=?, handler=? WHERE id=?", handling, note, user(req), id);
+            }
+            audit.log(user(req), "质量", "NCR处置", n.get("ncr_no") + " " + handling, audit.getIp(req));
+            return Result.ok("让步接收".equals(handling) ? "已让步接收并关闭" : "已处置，等待复检");
+        } catch (Exception e) { return Result.error("处置失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/ncr/recheck/{id}")
+    @Transactional
+    public Result ncrRecheck(@PathVariable Long id, @RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"production".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT * FROM quality_ncr WHERE id=?", id);
+            if (rows.isEmpty()) return Result.error("异常单不存在");
+            Map<String,Object> n = rows.get(0);
+            if (!"待复检".equals(String.valueOf(n.get("status")))) return Result.error("当前状态「" + n.get("status") + "」不可复检");
+            String result = String.valueOf(body.getOrDefault("result", ""));
+            if (!"合格".equals(result) && !"不合格".equals(result)) return Result.error("复检结论须为：合格 / 不合格");
+            String note = String.valueOf(body.getOrDefault("recheck_note", ""));
+            String batchNo = String.valueOf(n.getOrDefault("batch_no", ""));
+            if ("合格".equals(result)) {
+                db.update("UPDATE quality_ncr SET status='已关闭', recheck_result=?, recheck_note=?, closed_at=NOW() WHERE id=?", result, note, id);
+                if (!batchNo.isEmpty()) db.update("UPDATE trade_batch_trace SET status='在库' WHERE batch_no=? AND status='已冻结'", batchNo); // 复检通过解冻
+                audit.log(user(req), "质量", "NCR复检关闭", n.get("ncr_no") + " 合格" + (batchNo.isEmpty() ? "" : " 解冻批次" + batchNo), audit.getIp(req));
+                return Result.ok("复检合格，异常单已关闭" + (batchNo.isEmpty() ? "" : "，批次已解冻"));
+            } else {
+                db.update("UPDATE quality_ncr SET status='处置中', recheck_result=?, recheck_note=? WHERE id=?", result, note, id);
+                audit.log(user(req), "质量", "NCR复检驳回", n.get("ncr_no") + " 不合格，回到处置中", audit.getIp(req));
+                return Result.ok("复检不合格，异常单回到「处置中」重新处置");
+            }
+        } catch (Exception e) { return Result.error("复检失败: " + e.getMessage()); }
     }
 
     // ── 回收站恢复 ──
