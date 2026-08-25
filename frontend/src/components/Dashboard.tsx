@@ -133,6 +133,29 @@ export default function Dashboard() {
   const [data, setData] = useState<any>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [activity, setActivity] = useState<any[]>([]);
+  // 仪表盘自定义配置（板块显隐，持久化到 localStorage）
+  const DASH_SECTIONS: Array<{ key: string; label: string }> = [
+    { key: 'activity', label: '经营动态' },
+    { key: 'sales', label: '销售趋势（月）' },
+    { key: 'purchase', label: '采购趋势（月）' },
+    { key: 'category', label: '库存价值分布' },
+    { key: 'weekly', label: '近7天销售' },
+    { key: 'third', label: '部门分布/质量趋势' },
+  ];
+  const [dashCfg, setDashCfg] = useState<Record<string, boolean>>(() => {
+    const def: Record<string, boolean> = {};
+    DASH_SECTIONS.forEach(s => { def[s.key] = true; });
+    try { return { ...def, ...JSON.parse(localStorage.getItem('erp_dash_cfg') || '{}') }; }
+    catch { return def; }
+  });
+  const [cfgOpen, setCfgOpen] = useState(false);
+  const toggleDashSection = (key: string) => {
+    setDashCfg(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      localStorage.setItem('erp_dash_cfg', JSON.stringify(next));
+      return next;
+    });
+  };
   useEffect(() => {
     let cancelled = false;
     setLoadFailed(false);
@@ -174,7 +197,25 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_370px] gap-6 items-start">
+      {/* 仪表盘自定义配置 */}
+      <div className="flex justify-end relative no-print">
+        <button onClick={() => setCfgOpen(o => !o)} className="px-3 py-1.5 rounded-lg text-xs bg-white border border-slate-200 text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors flex items-center gap-1.5">⚙️ 自定义看板</button>
+        {cfgOpen && (<>
+          <div className="fixed inset-0 z-40" onClick={() => setCfgOpen(false)} />
+          <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl border border-slate-200 shadow-xl z-50 p-3 erp-fade-in">
+            <p className="text-[11px] text-slate-400 mb-2 px-1">选择要在看板显示的板块（本机持久化）</p>
+            {DASH_SECTIONS.map(s => (
+              <label key={s.key} className="flex items-center gap-2 px-1.5 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer text-xs text-slate-600">
+                <input type="checkbox" checked={!!dashCfg[s.key]} onChange={() => toggleDashSection(s.key)} className="accent-indigo-600"/>
+                {s.label}
+              </label>
+            ))}
+            <button onClick={() => { const def: Record<string, boolean> = {}; DASH_SECTIONS.forEach(s => { def[s.key] = true; }); setDashCfg(def); localStorage.setItem('erp_dash_cfg', JSON.stringify(def)); }} className="mt-2 w-full py-1.5 rounded-lg text-[11px] bg-slate-50 text-slate-500 hover:bg-slate-100">恢复默认</button>
+          </div>
+        </>)}
+      </div>
+
+      <div className={`grid grid-cols-1 gap-6 items-start ${dashCfg.activity ? 'lg:grid-cols-[1fr_370px]' : ''}`}>
         <GuidanceCard
           steps={[
             '第一步：观察顶部 Hero 看板，查看当前在线人员与待审核注册用户。',
@@ -187,7 +228,7 @@ export default function Dashboard() {
             '【期末关账】完成 ➔ 自动提取 4104 科目净利润并同步至经营 KPI 看板。'
           ]}
         />
-        <ActivityFeed items={activity} />
+        {dashCfg.activity && <ActivityFeed items={activity} />}
       </div>
       {/* Hero Banner */}
       <div className="rounded-2xl p-8 text-white relative overflow-hidden" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed, #6366f1)' }}>
@@ -226,8 +267,8 @@ export default function Dashboard() {
       </div>
 
       {/* Charts Row 1 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="📈 销售趋势（按月）">
+      <div className={`grid grid-cols-1 gap-6 ${dashCfg.sales && dashCfg.purchase ? 'lg:grid-cols-2' : ''}`}>
+        {dashCfg.sales && <ChartCard title="📈 销售趋势（按月）">
           <ResponsiveContainer width="100%" height={280}>
             <AreaChart data={salesMonthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <defs><linearGradient id="salesGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/><stop offset="95%" stopColor="#6366f1" stopOpacity={0}/></linearGradient></defs>
@@ -238,8 +279,8 @@ export default function Dashboard() {
               <Area type="monotone" dataKey="value" stroke="#6366f1" strokeWidth={2.5} fill="url(#salesGrad)"/>
             </AreaChart>
           </ResponsiveContainer>
-        </ChartCard>
-        <ChartCard title="🛒 采购趋势（按月）">
+        </ChartCard>}
+        {dashCfg.purchase && <ChartCard title="🛒 采购趋势（按月）">
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={purchaseMonthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
@@ -249,12 +290,12 @@ export default function Dashboard() {
               <Bar dataKey="value" fill="#06b6d4" radius={[6, 6, 0, 0]} maxBarSize={48}/>
             </BarChart>
           </ResponsiveContainer>
-        </ChartCard>
+        </ChartCard>}
       </div>
 
       {/* Charts Row 2 */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <ChartCard title="📦 库存金额分布 TOP10" empty={productCategory.length === 0}>
+        {dashCfg.category && <ChartCard title="📦 库存金额分布 TOP10" empty={productCategory.length === 0}>
           <ResponsiveContainer width="100%" height={240}>
             <PieChart>
               <Pie data={productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={4} dataKey="value" label={({ name, percent }: any) => `${name} ${((percent || 0) * 100).toFixed(0)}%`} labelLine={false}>
@@ -263,8 +304,8 @@ export default function Dashboard() {
               <Tooltip contentStyle={{ borderRadius: '0.75rem', border: '1px solid #e2e8f0' }}/>
             </PieChart>
           </ResponsiveContainer>
-        </ChartCard>
-        <ChartCard title="📊 近 7 天销售趋势" empty={salesWeekly.length === 0}>
+        </ChartCard>}
+        {dashCfg.weekly && <ChartCard title="📊 近 7 天销售趋势" empty={salesWeekly.length === 0}>
           <ResponsiveContainer width="100%" height={240}>
             <LineChart data={salesWeekly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false}/>
@@ -274,8 +315,8 @@ export default function Dashboard() {
               <Line type="monotone" dataKey="value" stroke="#10b981" strokeWidth={2.5} dot={{ fill: '#10b981', r: 4 }} activeDot={{ r: 6 }}/>
             </LineChart>
           </ResponsiveContainer>
-        </ChartCard>
-        {currentUser?.role === 'admin' ? (
+        </ChartCard>}
+        {dashCfg.third && (currentUser?.role === 'admin' ? (
           <ChartCard title="👥 部门人员分布">
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={roleDistribution} layout="vertical" margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
@@ -299,7 +340,7 @@ export default function Dashboard() {
               </LineChart>
             </ResponsiveContainer>
           </ChartCard>
-        )}
+        ))}
       </div>
 
       {/* Bottom KPI Gradient Cards */}

@@ -475,6 +475,18 @@ insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model',
   insert('trade_stock_log', ['log_no', 'product_code', 'product_name', 'warehouse', 'change_type', 'before_qty', 'change_qty', 'after_qty', 'ref_no', 'operator', 'change_date'], logRows);
 }
 
+// ── 部门月度预算（近4个月，费用审批超预算拦截依据） ──
+{
+  const budgetRows = [];
+  const depts = [['销售部', 35000], ['财务部', 15000], ['生产部', 40000], ['仓储部', 18000], ['采购部', 25000], ['人事部', 12000], ['售后部', 16000], ['管理层', 30000]];
+  for (let m = 3; m >= 0; m--) {
+    for (const [d, base] of depts) {
+      budgetRows.push([q(d), periodOfMonth(m), money(base + ri(-2000, 3000)), q('')]);
+    }
+  }
+  insert('oa_budget', ['department', 'budget_month', 'budget_amount', 'remark'], budgetRows);
+}
+
 // ── 销售目标（近9个月 × 3名销售，随业务增长爬坡） ──
 {
   const targetRows = [];

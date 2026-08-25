@@ -77,9 +77,36 @@ public class BizController {
     @PostMapping("/submit-approval") public Result submit(@RequestBody Map<String,Object> body, HttpServletRequest req) {
         String type = val(body.get("type"));
         if (type.isEmpty()) return Result.error("审批类型不能为空");
-        workflow.submit(type, String.valueOf(req.getAttribute("user")), String.valueOf(body.getOrDefault("dept","")), String.valueOf(body.getOrDefault("refNo","")), new java.math.BigDecimal(body.getOrDefault("amount","0").toString()), String.valueOf(body.getOrDefault("remark","")));
+        try {
+            workflow.submit(type, String.valueOf(req.getAttribute("user")), String.valueOf(body.getOrDefault("dept","")), String.valueOf(body.getOrDefault("refNo","")), new java.math.BigDecimal(body.getOrDefault("amount","0").toString()), String.valueOf(body.getOrDefault("remark","")));
+        } catch (Exception e) { return Result.error(e.getMessage()); }
         audit.log(String.valueOf(req.getAttribute("user")), "协同", "提交审批", String.valueOf(body.get("type")), audit.getIp(req));
         return Result.ok("已提交审批");
+    }
+
+    // ── 部门预算占用查询（费用审批表单提示用） ──
+    @GetMapping("/budget-usage") public Result budgetUsage(@RequestParam String department) {
+        try {
+            String month = db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m')", String.class);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("month", month);
+            ret.put("department", department);
+            List<Map<String,Object>> b = db.queryForList("SELECT budget_amount FROM oa_budget WHERE department=? AND budget_month=?", department, month);
+            if (b.isEmpty() || b.get(0).get("budget_amount") == null) {
+                ret.put("hasBudget", false);
+                return Result.ok(ret);
+            }
+            BigDecimal budget = new java.math.BigDecimal(b.get(0).get("budget_amount").toString());
+            BigDecimal used = db.queryForObject(
+                "SELECT COALESCE(SUM(amount),0) FROM oa_approval_main WHERE approval_type='费用审批' AND department=? AND approval_status IN ('待审批','已通过') AND DATE_FORMAT(submit_date,'%Y-%m')=?",
+                BigDecimal.class, department, month);
+            if (used == null) used = BigDecimal.ZERO;
+            ret.put("hasBudget", true);
+            ret.put("budget", budget);
+            ret.put("used", used);
+            ret.put("available", budget.subtract(used));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("预算查询失败: " + e.getMessage()); }
     }
 
     // ── 工作流：任务列表 / 详情 ──
@@ -771,7 +798,8 @@ public class BizController {
                 String.valueOf(body.getOrDefault("voucher_word","记")),
                 String.valueOf(body.getOrDefault("period","")),
                 lines,
-                user(req));
+                user(req),
+                req.getHeader("X-Company-Code"));
             audit.log(user(req), "会计", "新增凭证", String.valueOf(r.get("voucher_no")), audit.getIp(req));
             return Result.ok(r);
         } catch (Exception e) { return Result.error("凭证生成失败: " + e.getMessage()); }

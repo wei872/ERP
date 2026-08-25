@@ -25,6 +25,7 @@ const BigScreen = lazy(() => import('./BigScreen'));
 const DailyReportPage = lazy(() => import('./DailyReportPage'));
 const DictManagePage = lazy(() => import('./DictManagePage'));
 const RecycleBinPage = lazy(() => import('./RecycleBinPage'));
+const MobileApprovalPage = lazy(() => import('./MobileApprovalPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -34,11 +35,12 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'workflow',       label: '工作流审批',   icon: '🔁', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
+  { type: 'mapproval',      label: '移动审批',     icon: '📱', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'voucher',        label: '会计凭证',     icon: '📒', roles: ['admin','accounting'] },
   { type: 'statements',     label: '三大财务报表', icon: '📊', roles: ['admin','accounting'] },
   { type: 'reconciliation', label: '应收应付核销', icon: '💸', roles: ['admin','accounting'] },
@@ -76,6 +78,7 @@ export default function Layout() {
   const PAGE_ENTRIES: Array<{ label: string; icon: string; page: Page }> = [
     { label: '控制台', icon: '📊', page: { type: 'dashboard' } },
     { label: '经营日报', icon: '📰', page: { type: 'daily' } },
+    { label: '移动审批', icon: '📱', page: { type: 'mapproval' } },
     { label: '报表中心', icon: '📈', page: { type: 'report' } },
     { label: '工作流审批', icon: '🔁', page: { type: 'workflow' } },
     { label: '会计凭证', icon: '📒', page: { type: 'voucher' } },
@@ -202,6 +205,7 @@ export default function Layout() {
     if (page.type === 'daily') return '📰 经营日报';
     if (page.type === 'dicts') return '📖 数据字典维护';
     if (page.type === 'recycle') return '🗑️ 操作回收站';
+    if (page.type === 'mapproval') return '📱 移动审批中心';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -392,6 +396,7 @@ export default function Layout() {
         {page.type === 'daily' && <DailyReportPage />}
         {page.type === 'dicts' && <DictManagePage />}
         {page.type === 'recycle' && <RecycleBinPage />}
+        {page.type === 'mapproval' && <MobileApprovalPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
         </Suspense>

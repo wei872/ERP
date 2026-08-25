@@ -120,6 +120,30 @@ public class WorkflowService {
     /** 提交审批 — 创建审批主表 + 流程实例 + 多级 task 节点（按角色指派） + 审批类型明细表 */
     @Transactional
     public void submit(String type, String applicant, String dept, String refNo, BigDecimal amount, String remark) {
+        // 费用审批预算控制：部门当月预算（未设预算/无预算表则不限制）
+        if ("费用审批".equals(type) && amount != null && amount.signum() > 0 && dept != null && !dept.isEmpty()) {
+            try {
+                String month = new java.text.SimpleDateFormat("yyyy-MM").format(new java.util.Date());
+                List<Map<String,Object>> b = db.queryForList("SELECT budget_amount FROM oa_budget WHERE department=? AND budget_month=?", dept, month);
+                if (!b.isEmpty() && b.get(0).get("budget_amount") != null) {
+                    BigDecimal budget = new BigDecimal(b.get(0).get("budget_amount").toString());
+                    BigDecimal used = BigDecimal.ZERO;
+                    BigDecimal u = db.queryForObject(
+                        "SELECT COALESCE(SUM(amount),0) FROM oa_approval_main WHERE approval_type='费用审批' AND department=? AND approval_status IN ('待审批','已通过') AND DATE_FORMAT(submit_date,'%Y-%m')=?",
+                        BigDecimal.class, dept, month);
+                    if (u != null) used = u;
+                    if (used.add(amount).compareTo(budget) > 0) {
+                        throw new RuntimeException("超出部门预算：" + dept + " " + month + " 预算 ¥" + budget
+                            + "，已占用 ¥" + used + "，本单 ¥" + amount + "，将超出 ¥" + used.add(amount).subtract(budget)
+                            + " —— 请压缩金额、追加预算或下月再报");
+                    }
+                }
+            } catch (org.springframework.dao.DataAccessException dae) {
+                // 预算表不存在等 DB 结构问题不阻断提交
+            } catch (RuntimeException re) {
+                throw re; // 超预算等业务拦截原样上抛
+            }
+        }
         String no = "AP-" + System.currentTimeMillis();
         db.update("INSERT INTO oa_approval_main(approval_no,approval_type,applicant,department,ref_no,amount,submit_date,approval_status,remark) VALUES(?,?,?,?,?,?,CURDATE(),'待审批',?)",
             no, type, applicant, dept, refNo == null ? "" : refNo, amount == null ? BigDecimal.ZERO : amount, remark);

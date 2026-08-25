@@ -5,6 +5,11 @@ async function request<T = any>(url: string, options: RequestInit = {}): Promise
   const token = localStorage.getItem('erp_token');
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> || {}) };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  // 多公司（账套）上下文：随请求携带当前公司编码
+  try {
+    const comp = localStorage.getItem('erp_company');
+    if (comp) { const cc = JSON.parse(comp).company_code; if (cc) headers['X-Company-Code'] = cc; }
+  } catch { /* ignore */ }
   const res = await fetch(`${BASE}${url}`, { ...options, headers });
   const json = await res.json();
   if (!json.success) {
@@ -77,6 +82,7 @@ export const bizApi = {
   stockCheckConfirm: (body: { product_code: string; warehouse: string; actual_qty: number; product_name?: string; reason?: string }) => request<any>('/biz/stock-check/confirm', { method: 'POST', body: JSON.stringify(body) }),
   restoreBackup: (id: number) => request<any>(`/biz/restore/${id}`, { method: 'POST' }),
   companies: () => request<any[]>('/biz/companies'),
+  budgetUsage: (department: string) => request<any>(`/biz/budget-usage?department=${encodeURIComponent(department)}`),
   importExcel: async (type: string, file: File) => {
     const token = localStorage.getItem('erp_token');
     const fd = new FormData();

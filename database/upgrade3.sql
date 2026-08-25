@@ -198,6 +198,24 @@ INSERT IGNORE INTO sys_company(company_code, company_name, short_name, tax_no, a
 ('HQ', '三包智联科技有限公司', '三包智联', '91310000MA1FL8XQ0A', '上海市松江区茸江路88号', '启用', 1),
 ('SZ-01', '深圳智造分公司', '深圳智造', '91440300MA5FQK7B2C', '深圳市南山区科技园南区12栋', '启用', 0);
 
+-- ── 凭证公司维度：按公司（账套）归档凭证 ──
+SET @c10 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='voucher_main' AND column_name='company_code');
+SET @s10 = IF(@c10=0, "ALTER TABLE voucher_main ADD COLUMN company_code VARCHAR(50) DEFAULT 'HQ' COMMENT '公司编码（账套）'", 'SELECT 1'); PREPARE st10 FROM @s10; EXECUTE st10; DEALLOCATE PREPARE st10;
+
+-- ── 部门月度预算（费用审批超预算拦截的依据） ──
+CREATE TABLE IF NOT EXISTS oa_budget (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  department VARCHAR(50) COMMENT '部门',
+  budget_month VARCHAR(10) COMMENT '预算月份 yyyy-MM',
+  budget_amount DECIMAL(18,2) COMMENT '预算金额',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_dept_month (department, budget_month)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('oa_budget','部门预算','协同办公','预算管理',913);
+
 -- 批次/编码规则表注册进通用菜单与字典
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('trade_batch_trace','批次追溯台账','进销存管理','批次追溯',901),

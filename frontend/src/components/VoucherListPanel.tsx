@@ -13,11 +13,13 @@ const money = (v: unknown) => {
   return Number.isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 };
 
-/** 凭证列表：审核流状态机（待审核 → 已审核 → 已记账） */
+/** 凭证列表：审核流状态机（待审核 → 已审核 → 已记账），支持按公司账套筛选 */
 export default function VoucherListPanel() {
   const [rows, setRows] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [compFilter, setCompFilter] = useState('all');
 
   const load = useCallback(async (kw: string) => {
     setLoading(true);
@@ -28,7 +30,7 @@ export default function VoucherListPanel() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { load(''); }, [load]);
+  useEffect(() => { load(''); bizApi.companies().then(r => setCompanies(r.data || [])).catch(() => {}); }, [load]);
 
   const doAudit = async (no: string) => {
     try { await bizApi.voucherAudit(no); toastNotify(`凭证 ${no} 审核通过`); load(search); }
@@ -47,6 +49,12 @@ export default function VoucherListPanel() {
           <p className="text-xs text-slate-400 mt-1">手工凭证保存后进入「待审核」：会计/管理员【审核】→【记账】归档；系统自动凭证直接「已审核」</p>
         </div>
         <div className="flex gap-2">
+          {companies.length > 0 && (
+            <select value={compFilter} onChange={e => setCompFilter(e.target.value)} title="按公司账套筛选" className="erp-input w-36">
+              <option value="all">全部账套</option>
+              {companies.map((c: any) => <option key={c.company_code} value={c.company_code}>{c.short_name || c.company_name}</option>)}
+            </select>
+          )}
           <input value={search} onChange={e => { setSearch(e.target.value); setTimeout(() => load(e.target.value), 350); }} placeholder="搜索凭证号/摘要..." className="erp-input w-56"/>
           <button onClick={() => load(search)} disabled={loading} className="erp-btn erp-btn-ghost">↻</button>
         </div>
@@ -56,10 +64,10 @@ export default function VoucherListPanel() {
         <div className="overflow-x-auto">
           <table className="erp-table">
             <thead><tr>
-              <th>凭证号</th><th>凭证字</th><th>日期</th><th>期间</th><th className="text-right">借方合计</th><th className="text-right">贷方合计</th><th>制单人</th><th>审核人</th><th>状态</th><th className="text-center">操作</th>
+              <th>凭证号</th><th>凭证字</th><th>日期</th><th>期间</th><th className="text-right">借方合计</th><th className="text-right">贷方合计</th><th>制单人</th><th>审核人</th><th>账套</th><th>状态</th><th className="text-center">操作</th>
             </tr></thead>
             <tbody>
-              {rows.map(v => {
+              {rows.filter(v => compFilter === 'all' || String(v.company_code || 'HQ') === compFilter).map(v => {
                 const st = String(v.voucher_status || '');
                 return (
                   <tr key={v.id}>
@@ -71,6 +79,7 @@ export default function VoucherListPanel() {
                     <td className="text-right tabular-nums whitespace-nowrap font-medium">{money(v.credit_total)}</td>
                     <td className="whitespace-nowrap text-slate-600">{v.prepared_by || '—'}</td>
                     <td className="whitespace-nowrap text-slate-600">{v.reviewer || '—'}</td>
+                    <td className="whitespace-nowrap"><span className="text-[10px] font-mono text-slate-400">{String(v.company_code || 'HQ')}</span></td>
                     <td className="whitespace-nowrap"><span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium border ${STATUS_STYLE[st] || 'bg-slate-100 text-slate-500 border-slate-200'}`}>{st}</span></td>
                     <td className="text-center whitespace-nowrap">
                       {st === '待审核' && <button onClick={() => doAudit(String(v.voucher_no))} className="px-2.5 py-1 text-[11px] bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md font-medium">✓ 审核</button>}
@@ -80,10 +89,10 @@ export default function VoucherListPanel() {
                   </tr>
                 );
               })}
-              {rows.length === 0 && !loading && (
-                <tr><td colSpan={10} className="py-12 text-center">
+              {rows.filter(v => compFilter === 'all' || String(v.company_code || 'HQ') === compFilter).length === 0 && !loading && (
+                <tr><td colSpan={11} className="py-12 text-center">
                   <div className="text-3xl mb-2">📒</div>
-                  <p className="text-sm text-slate-400">{search ? `未找到匹配 "${search}" 的凭证` : '暂无凭证'}</p>
+                  <p className="text-sm text-slate-400">{search || compFilter !== 'all' ? '未找到匹配的凭证' : '暂无凭证'}</p>
                 </td></tr>
               )}
             </tbody>

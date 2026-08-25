@@ -30,6 +30,13 @@ export default function WorkflowPage() {
   const [refNo, setRefNo] = useState('');
   const [amount, setAmount] = useState(0);
   const [remark, setRemark] = useState('');
+  // 费用审批预算占用提示
+  const [budgetInfo, setBudgetInfo] = useState<any>(null);
+  useEffect(() => {
+    if (submitType === '费用审批' && currentUser?.department) {
+      bizApi.budgetUsage(currentUser.department).then(r => setBudgetInfo(r.data)).catch(() => setBudgetInfo(null));
+    } else setBudgetInfo(null);
+  }, [submitType, currentUser?.department]);
 
   const toastFn = useCallback((m: string) => toastNotify(m), []);
   const load = useCallback(async () => {
@@ -219,6 +226,22 @@ export default function WorkflowPage() {
               <input type="number" value={amount} onChange={e=>setAmount(Number(e.target.value)||0)} className="w-full mt-1 px-3 py-2 border rounded-lg text-sm"/>
             </div>
           </div>
+          {/* 费用审批预算提示：部门当月预算 / 已占用 / 可用 */}
+          {submitType === '费用审批' && budgetInfo?.hasBudget && (() => {
+            const remain = Number(budgetInfo.available) - (Number(amount) || 0);
+            const over = remain < 0;
+            return (
+              <div className={`px-4 py-3 rounded-xl border text-xs ${over ? 'bg-red-50 border-red-200 text-red-600' : 'bg-emerald-50/60 border-emerald-100 text-emerald-700'}`}>
+                💳 {currentUser?.department} 本月预算 <b className="tabular-nums">¥{Number(budgetInfo.budget).toLocaleString()}</b>
+                ，已占用 <b className="tabular-nums">¥{Number(budgetInfo.used).toLocaleString()}</b>
+                ，本单后{over ? '将超出' : '剩余'} <b className="tabular-nums">¥{Math.abs(remain).toLocaleString()}</b>
+                {over && ' —— 超出预算将被拦截，请压缩金额'}
+              </div>
+            );
+          })()}
+          {submitType === '费用审批' && budgetInfo && !budgetInfo.hasBudget && (
+            <div className="px-4 py-3 rounded-xl border bg-slate-50 border-slate-100 text-xs text-slate-500">💳 {currentUser?.department} 本月未设置预算，费用不受限（可在「部门预算」表维护）</div>
+          )}
           <div>
             <label className="text-xs text-gray-500">备注/事由</label>
             <textarea value={remark} onChange={e=>setRemark(e.target.value)} rows={3} className="w-full mt-1 px-3 py-2 border rounded-lg text-sm" placeholder="费用事由 / 请假原因等"/>

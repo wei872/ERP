@@ -63,9 +63,9 @@ public class FinanceService {
             payNo, supplierCode, supplierName, amt, amt, "采购单:" + purchaseNo);
     }
 
-    /** 手动录入凭证：主表+明细，并更新各科目余额（借贷必须平衡） */
+    /** 手动录入凭证：主表+明细，并更新各科目余额（借贷必须平衡），按公司账套归档 */
     @Transactional
-    public Map<String,Object> createVoucher(String voucherWord, String period, List<Map<String,Object>> lines, String preparedBy) throws Exception {
+    public Map<String,Object> createVoucher(String voucherWord, String period, List<Map<String,Object>> lines, String preparedBy, String companyCode) throws Exception {
         if (lines == null || lines.isEmpty()) throw new RuntimeException("凭证明细不能为空");
         String vn = "V-" + System.currentTimeMillis();
         BigDecimal debitTotal = BigDecimal.ZERO, creditTotal = BigDecimal.ZERO;
@@ -83,8 +83,9 @@ public class FinanceService {
         }
         if (debitTotal.compareTo(creditTotal) != 0) throw new RuntimeException("借贷不平: 借方=" + debitTotal + " 贷方=" + creditTotal);
         // 手工凭证进入审核流：待审核 → 已审核 → 已记账（自动联动凭证由系统直接置已审核）
-        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status) VALUES(?,?,CURDATE(),?,?,?,?,'待审核')",
-            vn, voucherWord == null ? "记" : voucherWord, period == null ? new SimpleDateFormat("yyyy-MM").format(new Date()) : period, debitTotal, creditTotal, preparedBy == null ? "系统" : preparedBy);
+        String cc = (companyCode == null || companyCode.trim().isEmpty()) ? "HQ" : companyCode.trim();
+        db.update("INSERT INTO voucher_main(voucher_no,voucher_word,voucher_date,period,debit_total,credit_total,prepared_by,voucher_status,company_code) VALUES(?,?,CURDATE(),?,?,?,?,'待审核',?)",
+            vn, voucherWord == null ? "记" : voucherWord, period == null ? new SimpleDateFormat("yyyy-MM").format(new Date()) : period, debitTotal, creditTotal, preparedBy == null ? "系统" : preparedBy, cc);
         for (Object[] d : detailBatch) {
             db.update("INSERT INTO voucher_detail(voucher_no,line_no,subject_code,subject_name,debit_amount,credit_amount,summary) VALUES(?,?,?,?,?,?,?)", d);
         }
