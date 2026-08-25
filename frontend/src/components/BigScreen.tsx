@@ -31,11 +31,11 @@ const defaultCfg = () => {
 
 function Kpi({ icon, label, value, accent }: { icon: string; label: string; value: string; accent: string }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md px-5 py-4 flex items-center gap-4">
-      <span className={`w-11 h-11 rounded-xl flex items-center justify-center text-xl shrink-0 ${accent}`}>{icon}</span>
+    <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md px-3.5 py-3 md:px-5 md:py-4 flex items-center gap-3 md:gap-4">
+      <span className={`w-9 h-9 md:w-11 md:h-11 rounded-xl flex items-center justify-center text-lg md:text-xl shrink-0 ${accent}`}>{icon}</span>
       <div className="min-w-0">
-        <p className="text-[11px] text-slate-400 mb-0.5 truncate">{label}</p>
-        <p className="text-xl font-bold text-white tabular-nums tracking-tight truncate">{value}</p>
+        <p className="text-[10px] md:text-[11px] text-slate-400 mb-0.5 truncate">{label}</p>
+        <p className="text-base md:text-xl font-bold text-white tabular-nums tracking-tight truncate">{value}</p>
       </div>
     </div>
   );
@@ -51,6 +51,13 @@ export default function BigScreen({ onExit }: { onExit: () => void }) {
     try { return { ...defaultCfg(), ...JSON.parse(localStorage.getItem(CFG_KEY) || '{}') }; } catch { return defaultCfg(); }
   });
   const [cfgOpen, setCfgOpen] = useState(false);
+  // 移动端投屏适配（v5.26）：小屏压缩图表高度，随窗口尺寸实时切换
+  const [chartH, setChartH] = useState<number>(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 180 : 240));
+  useEffect(() => {
+    const onResize = () => setChartH(window.innerWidth < 640 ? 180 : 240);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
   const toggleCfg = (key: string) => {
     setCfg(prev => {
       const next = { ...prev, [key]: !prev[key] };
@@ -86,23 +93,23 @@ export default function BigScreen({ onExit }: { onExit: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[150] overflow-y-auto text-white" style={{ background: 'radial-gradient(ellipse at 20% 0%, #1e1b4b 0%, #0f172a 45%, #020617 100%)' }}>
-      <div className="max-w-[1700px] mx-auto p-6 space-y-5">
-        {/* 标题栏 */}
-        <div className="flex items-center justify-between">
+      <div className="max-w-[1700px] mx-auto p-3 md:p-6 space-y-4 md:space-y-5">
+        {/* 标题栏（移动端自动换行压缩） */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
-              <span className="w-9 h-9 rounded-xl flex items-center justify-center text-base font-bold" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>E</span>
+            <h1 className="text-lg md:text-2xl font-bold tracking-tight flex items-center gap-2 md:gap-3">
+              <span className="w-8 h-8 md:w-9 md:h-9 rounded-xl flex items-center justify-center text-sm md:text-base font-bold" style={{ background: 'linear-gradient(135deg,#6366f1,#8b5cf6)' }}>E</span>
               ERP 经营驾驶舱
             </h1>
-            <p className="text-xs text-slate-400 mt-1.5">业务数据实时投屏 · 每 60 秒自动刷新 · 指标可按需配置</p>
+            <p className="text-[10px] md:text-xs text-slate-400 mt-1.5">业务数据实时投屏 · 每 60 秒自动刷新 · 指标可按需配置</p>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 md:gap-4">
             <div className="text-right">
-              <p className="text-2xl font-bold tabular-nums tracking-wider">{now.toLocaleTimeString('zh-CN', { hour12: false })}</p>
-              <p className="text-[11px] text-slate-400">{now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</p>
+              <p className="text-lg md:text-2xl font-bold tabular-nums tracking-wider">{now.toLocaleTimeString('zh-CN', { hour12: false })}</p>
+              <p className="text-[11px] text-slate-400 hidden sm:block">{now.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}</p>
             </div>
-            <button onClick={() => setCfgOpen(true)} title="配置大屏指标" className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-sm transition-colors">⚙️ 配置指标</button>
-            <button onClick={onExit} title="退出大屏（Esc）" className="px-4 py-2 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-sm transition-colors">✕ 退出大屏</button>
+            <button onClick={() => setCfgOpen(true)} title="配置大屏指标" className="px-2.5 py-2 md:px-4 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs md:text-sm transition-colors">⚙️ <span className="hidden sm:inline">配置指标</span></button>
+            <button onClick={onExit} title="退出大屏（Esc）" className="px-2.5 py-2 md:px-4 rounded-xl border border-white/15 bg-white/5 hover:bg-white/10 text-xs md:text-sm transition-colors">✕ <span className="hidden sm:inline">退出大屏</span></button>
           </div>
         </div>
 
@@ -124,7 +131,7 @@ export default function BigScreen({ onExit }: { onExit: () => void }) {
             {cfg.salesTrend && (
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5">
                 <h3 className="text-sm font-semibold text-slate-200 mb-3">📈 销售趋势（按月）</h3>
-                <ResponsiveContainer width="100%" height={240}>
+                <ResponsiveContainer width="100%" height={chartH}>
                   <AreaChart data={salesMonthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                     <defs><linearGradient id="bsSales" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#818cf8" stopOpacity={0.5} /><stop offset="95%" stopColor="#818cf8" stopOpacity={0} /></linearGradient></defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" vertical={false} />
@@ -139,7 +146,7 @@ export default function BigScreen({ onExit }: { onExit: () => void }) {
             {cfg.purchaseTrend && (
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5">
                 <h3 className="text-sm font-semibold text-slate-200 mb-3">🛒 采购趋势（按月）</h3>
-                <ResponsiveContainer width="100%" height={240}>
+                <ResponsiveContainer width="100%" height={chartH}>
                   <BarChart data={purchaseMonthly} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.08)" vertical={false} />
                     <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
@@ -175,7 +182,7 @@ export default function BigScreen({ onExit }: { onExit: () => void }) {
             {cfg.stockPie && (
               <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5">
                 <h3 className="text-sm font-semibold text-slate-200 mb-3">📦 库存价值分布</h3>
-                <ResponsiveContainer width="100%" height={220}>
+                <ResponsiveContainer width="100%" height={chartH - 20}>
                   <PieChart>
                     <Pie data={productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3}>
                       {(productCategory.length ? productCategory : [{ name: '暂无', value: 1 }]).map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}

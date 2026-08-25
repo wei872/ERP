@@ -857,6 +857,226 @@ public class BizController {
         catch (Exception e) { return Result.error("信用占用查询失败: " + e.getMessage()); }
     }
 
+    // ── 盘点盈亏分析（v5.26）：月度趋势 / 仓库分布 / TOP 差异商品 ──
+    @GetMapping("/stocktake-analysis") public Result stocktakeAnalysis() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            List<Map<String,Object>> summary = db.queryForList(
+                "SELECT COUNT(*) checks, COUNT(DISTINCT check_no) docs, " +
+                "COALESCE(SUM(CASE WHEN diff_qty>0 THEN diff_amount ELSE 0 END),0) gain_amount, " +
+                "COALESCE(SUM(CASE WHEN diff_qty<0 THEN -diff_amount ELSE 0 END),0) loss_amount " +
+                "FROM trade_stock_check");
+            ret.put("summary", summary.isEmpty() ? new LinkedHashMap<>() : summary.get(0));
+            ret.put("monthly", db.queryForList(
+                "SELECT DATE_FORMAT(check_date,'%Y-%m') month, COUNT(*) cnt, " +
+                "COALESCE(SUM(CASE WHEN diff_qty>0 THEN diff_amount ELSE 0 END),0) gain, " +
+                "COALESCE(SUM(CASE WHEN diff_qty<0 THEN -diff_amount ELSE 0 END),0) loss " +
+                "FROM trade_stock_check GROUP BY DATE_FORMAT(check_date,'%Y-%m') ORDER BY month DESC LIMIT 6"));
+            ret.put("byWarehouse", db.queryForList(
+                "SELECT warehouse, COUNT(*) cnt, " +
+                "COALESCE(SUM(CASE WHEN diff_qty>0 THEN diff_amount ELSE 0 END),0) gain, " +
+                "COALESCE(SUM(CASE WHEN diff_qty<0 THEN -diff_amount ELSE 0 END),0) loss " +
+                "FROM trade_stock_check GROUP BY warehouse ORDER BY loss DESC, gain DESC LIMIT 10"));
+            ret.put("topProducts", db.queryForList(
+                "SELECT product_code, MAX(product_name) product_name, COUNT(*) cnt, " +
+                "COALESCE(SUM(CASE WHEN diff_qty>0 THEN diff_amount ELSE 0 END),0) gain, " +
+                "COALESCE(SUM(CASE WHEN diff_qty<0 THEN -diff_amount ELSE 0 END),0) loss, " +
+                "COALESCE(SUM(ABS(diff_amount)),0) total " +
+                "FROM trade_stock_check WHERE diff_qty<>0 GROUP BY product_code ORDER BY total DESC LIMIT 8"));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("盘点分析加载失败: " + e.getMessage()); }
+    }
+
+    // ── 采购比价（v5.26）：同物料多供应商历史价格对比 + 最优推荐 + 潜在节省 ──
+    @GetMapping("/price-compare") public Result priceCompare(@RequestParam(required = false, defaultValue = "") String q) {
+        try {
+            String where = ""; Object[] params = new Object[0];
+            if (q != null && !q.trim().isEmpty()) {
+                where = " AND (d.product_code LIKE ? OR d.product_name LIKE ?)";
+                params = new Object[]{ "%" + q.trim() + "%", "%" + q.trim() + "%" };
+            }
+            List<Map<String,Object>> agg = db.queryForList(
+                "SELECT d.product_code, MAX(d.product_name) product_name, m.supplier_code, MAX(m.supplier_name) supplier_name, " +
+                "COUNT(DISTINCT m.purchase_no) order_cnt, COALESCE(SUM(d.qty),0) total_qty, " +
+                "MIN(d.unit_price) min_price, AVG(d.unit_price) avg_price " +
+                "FROM trade_purchase_detail d JOIN trade_purchase_main m ON d.purchase_no=m.purchase_no " +
+                "WHERE d.unit_price>0" + where + " GROUP BY d.product_code, m.supplier_code ORDER BY d.product_code LIMIT 2000", params);
+            List<Map<String,Object>> last = db.queryForList(
+                "SELECT t.product_code, m.supplier_code, t.unit_price last_price, m.purchase_date last_date " +
+                "FROM trade_purchase_detail t JOIN trade_purchase_main m ON t.purchase_no=m.purchase_no " +
+                "JOIN (SELECT d.product_code pc, m2.supplier_code sc, MAX(m2.purchase_date) md " +
+                "FROM trade_purchase_detail d JOIN trade_purchase_main m2 ON d.purchase_no=m2.purchase_no " +
+                "WHERE d.unit_price>0 GROUP BY d.product_code, m2.supplier_code) x " +
+                "ON t.product_code=x.pc AND m.supplier_code=x.sc AND m.purchase_date=x.md");
+            Map<String, Map<String,Object>> lastMap = new LinkedHashMap<>();
+            for (Map<String,Object> r : last) lastMap.put(r.get("product_code") + "::" + r.get("supplier_code"), r);
+            // 按商品分组组装比价行
+            Map<String, List<Map<String,Object>>> byProduct = new LinkedHashMap<>();
+            for (Map<String,Object> r : agg) {
+                Map<String,Object> lp = lastMap.get(r.get("product_code") + "::" + r.get("supplier_code"));
+                if (lp != null) { r.put("last_price", lp.get("last_price")); r.put("last_date", String.valueOf(lp.get("last_date")).substring(0, Math.min(10, String.valueOf(lp.get("last_date")).length()))); }
+                byProduct.computeIfAbsent(String.valueOf(r.get("product_code")), k -> new ArrayList<>()).add(r);
+            }
+            List<Map<String,Object>> rows = new ArrayList<>();
+            java.math.BigDecimal totalSaving = java.math.BigDecimal.ZERO;
+            Set<String> suppliers = new HashSet<>();
+            for (Map.Entry<String, List<Map<String,Object>>> e : byProduct.entrySet()) {
+                List<Map<String,Object>> sups = e.getValue();
+                for (Map<String,Object> s : sups) suppliers.add(String.valueOf(s.get("supplier_code")));
+                Map<String,Object> best = null, worst = null;
+                for (Map<String,Object> s : sups) {
+                    java.math.BigDecimal avg = new java.math.BigDecimal(s.get("avg_price").toString());
+                    if (best == null || avg.compareTo(new java.math.BigDecimal(best.get("avg_price").toString())) < 0) best = s;
+                    if (worst == null || avg.compareTo(new java.math.BigDecimal(worst.get("avg_price").toString())) > 0) worst = s;
+                }
+                java.math.BigDecimal saving = java.math.BigDecimal.ZERO;
+                if (best != null && worst != null && best != worst) {
+                    java.math.BigDecimal diff = new java.math.BigDecimal(worst.get("avg_price").toString()).subtract(new java.math.BigDecimal(best.get("avg_price").toString()));
+                    saving = diff.multiply(new java.math.BigDecimal(worst.get("total_qty").toString())).setScale(2, java.math.RoundingMode.HALF_UP);
+                    totalSaving = totalSaving.add(saving);
+                }
+                Map<String,Object> row = new LinkedHashMap<>();
+                row.put("product_code", e.getKey());
+                row.put("product_name", sups.get(0).get("product_name"));
+                row.put("supplier_count", sups.size());
+                row.put("best_supplier", best == null ? "" : best.get("supplier_name"));
+                row.put("best_avg_price", best == null ? null : best.get("avg_price"));
+                row.put("saving", saving);
+                row.put("suppliers", sups);
+                rows.add(row);
+            }
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("products", rows.size());
+            totals.put("suppliers", suppliers.size());
+            totals.put("saving", totalSaving);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", rows); ret.put("totals", totals);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("采购比价加载失败: " + e.getMessage()); }
+    }
+
+    // ── 销售提成（v5.26）：目标达成率阶梯计提 → 审批 → 联动工资表 ──
+    /** 阶梯提成率：<60%→1.0%，60~80%→1.5%，80~100%→2.0%，≥100%→2.5% 且超额部分加计 1% */
+    private java.math.BigDecimal commissionRate(java.math.BigDecimal ratePct) {
+        double r = ratePct.doubleValue();
+        if (r < 60) return new java.math.BigDecimal("1.0");
+        if (r < 80) return new java.math.BigDecimal("1.5");
+        if (r < 100) return new java.math.BigDecimal("2.0");
+        return new java.math.BigDecimal("2.5");
+    }
+
+    @PostMapping("/commission-calc") public Result commissionCalc(@RequestBody(required = false) Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"hr".equals(role(req))) return Result.error("权限不足");
+        try {
+            String period = body == null || body.get("period") == null || String.valueOf(body.get("period")).trim().isEmpty()
+                ? db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m')", String.class)
+                : String.valueOf(body.get("period")).trim();
+            if (!period.matches("\\d{4}-\\d{2}")) return Result.error("期间格式须为 yyyy-MM");
+            Map<String, java.math.BigDecimal> targets = new LinkedHashMap<>();
+            for (Map<String,Object> t : db.queryForList("SELECT salesperson, COALESCE(SUM(target_amount),0) target FROM trade_sales_target WHERE target_month=? GROUP BY salesperson", period))
+                targets.put(String.valueOf(t.get("salesperson")), new java.math.BigDecimal(t.get("target").toString()));
+            Map<String, Map<String,Object>> actuals = new LinkedHashMap<>();
+            for (Map<String,Object> a : db.queryForList("SELECT sales_person, COALESCE(SUM(total_amount),0) amt, COUNT(*) cnt FROM trade_sales_main WHERE DATE_FORMAT(sales_date,'%Y-%m')=? GROUP BY sales_person", period))
+                actuals.put(String.valueOf(a.get("sales_person")), a);
+            Set<String> persons = new LinkedHashSet<>(targets.keySet()); persons.addAll(actuals.keySet());
+            if (persons.isEmpty()) return Result.error(period + " 无销售目标也无销售记录，无法计算提成");
+            int calc = 0, skipped = 0;
+            for (String person : persons) {
+                java.math.BigDecimal target = targets.getOrDefault(person, java.math.BigDecimal.ZERO);
+                Map<String,Object> a = actuals.get(person);
+                java.math.BigDecimal actual = a == null ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(a.get("amt").toString());
+                java.math.BigDecimal rate = target.signum() > 0
+                    ? actual.multiply(new java.math.BigDecimal("100")).divide(target, 2, java.math.RoundingMode.HALF_UP)
+                    : java.math.BigDecimal.ZERO;
+                java.math.BigDecimal pct = commissionRate(rate);
+                java.math.BigDecimal commission = actual.multiply(pct).divide(new java.math.BigDecimal("100"), 2, java.math.RoundingMode.HALF_UP);
+                String note = "";
+                if (rate.compareTo(new java.math.BigDecimal("100")) >= 0 && target.signum() > 0) {
+                    java.math.BigDecimal extra = actual.subtract(target).divide(new java.math.BigDecimal("100"), 2, java.math.RoundingMode.HALF_UP);
+                    commission = commission.add(extra);
+                    note = "达标，超额部分加计1%";
+                } else { note = "阶梯率 " + pct + "%"; }
+                // 仅覆盖「待审核」行；已审批/已同步的行不被重算污染
+                String cno;
+                try { cno = noRule.nextNo("commission"); } catch (Exception e2) { cno = "TC-" + System.currentTimeMillis(); }
+                int n = db.update("INSERT INTO hr_sales_commission(commission_no,period,salesperson,target_amount,actual_amount,achieve_rate,rate_pct,commission,status,remark) " +
+                    "VALUES(?,?,?,?,?,?,?,?, '待审核', ?) " +
+                    "ON DUPLICATE KEY UPDATE commission_no=IF(status='待审核',VALUES(commission_no),commission_no), " +
+                    "target_amount=IF(status='待审核',VALUES(target_amount),target_amount), " +
+                    "actual_amount=IF(status='待审核',VALUES(actual_amount),actual_amount), " +
+                    "achieve_rate=IF(status='待审核',VALUES(achieve_rate),achieve_rate), " +
+                    "rate_pct=IF(status='待审核',VALUES(rate_pct),rate_pct), " +
+                    "commission=IF(status='待审核',VALUES(commission),commission), " +
+                    "remark=IF(status='待审核',VALUES(remark),remark)",
+                    cno, period, person, target, actual, rate, pct, commission, note);
+                if (n >= 2) calc++; else skipped++;
+            }
+            audit.log(user(req), "提成", "计算提成", period + " 人员=" + persons.size(), audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("period", period); ret.put("persons", persons.size()); ret.put("calc", calc); ret.put("skipped", skipped);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("提成计算失败: " + e.getMessage()); }
+    }
+
+    @GetMapping("/commission-list") public Result commissionList(@RequestParam(required = false, defaultValue = "") String period) {
+        try {
+            String p = period.trim().isEmpty() ? db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m')", String.class) : period.trim();
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("period", p);
+            ret.put("rows", db.queryForList("SELECT * FROM hr_sales_commission WHERE period=? ORDER BY commission DESC", p));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("提成列表加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/commission-approve/{id}") public Result commissionApprove(@PathVariable Long id, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"hr".equals(role(req))) return Result.error("权限不足");
+        try {
+            int n = db.update("UPDATE hr_sales_commission SET status='已通过' WHERE id=? AND status='待审核'", id);
+            if (n == 0) return Result.error("记录不存在或不是「待审核」状态");
+            audit.log(user(req), "提成", "审批通过", "id=" + id, audit.getIp(req));
+            return Result.ok("已审批通过");
+        } catch (Exception e) { return Result.error("审批失败: " + e.getMessage()); }
+    }
+
+    /** 提成同步工资表：叠加到当月工资奖金列并重算实发；无工资行则自动生成 */
+    @PostMapping("/commission-sync/{id}")
+    @Transactional
+    public Result commissionSync(@PathVariable Long id, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"hr".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT * FROM hr_sales_commission WHERE id=?", id);
+            if (rows.isEmpty()) return Result.error("提成记录不存在");
+            Map<String,Object> c = rows.get(0);
+            if (!"已通过".equals(String.valueOf(c.get("status")))) return Result.error("仅「已通过」的提成可同步工资，当前状态：" + c.get("status"));
+            String person = String.valueOf(c.get("salesperson"));
+            String period = String.valueOf(c.get("period"));
+            java.math.BigDecimal amt = new java.math.BigDecimal(c.get("commission").toString());
+            List<Map<String,Object>> sal = db.queryForList("SELECT * FROM hr_salary_main WHERE emp_name=? AND salary_month=? LIMIT 1", person, period);
+            String salaryNo;
+            if (!sal.isEmpty()) {
+                Map<String,Object> s = sal.get(0);
+                java.math.BigDecimal bonus = bd(s.get("bonus")).add(amt);
+                java.math.BigDecimal net = bd(s.get("base_salary")).add(bonus).subtract(bd(s.get("deduction"))).subtract(bd(s.get("insurance"))).subtract(bd(s.get("tax"))).setScale(2, java.math.RoundingMode.HALF_UP);
+                db.update("UPDATE hr_salary_main SET bonus=?, net_salary=?, remark=CONCAT(COALESCE(remark,''),' 含销售提成',?) WHERE id=?", bonus, net, String.valueOf(c.get("commission_no")), s.get("id"));
+                salaryNo = String.valueOf(s.get("salary_no"));
+            } else {
+                salaryNo = "SAL-" + period.replace("-", "") + "-" + Math.abs(person.hashCode() % 10000);
+                db.update("INSERT INTO hr_salary_main(salary_no,emp_no,emp_name,department,base_salary,bonus,deduction,insurance,tax,net_salary,salary_month,status,remark) VALUES(?,?,?,?,0,?,0,0,0,?,?,'待发放',?)",
+                    salaryNo, "", person, "销售部", amt, amt, period, "销售提成自动生成:" + c.get("commission_no"));
+            }
+            db.update("UPDATE hr_sales_commission SET status='已同步工资', remark=CONCAT(COALESCE(remark,''),' 已同步:',?) WHERE id=?", salaryNo, id);
+            audit.log(user(req), "提成", "同步工资", c.get("commission_no") + "→" + salaryNo + " ¥" + amt, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("salary_no", salaryNo); ret.put("commission_no", c.get("commission_no")); ret.put("amount", amt);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("同步工资失败: " + e.getMessage()); }
+    }
+
+    private java.math.BigDecimal bd(Object v) {
+        if (v == null) return java.math.BigDecimal.ZERO;
+        try { return new java.math.BigDecimal(v.toString()); } catch (Exception e) { return java.math.BigDecimal.ZERO; }
+    }
+
     // ── 回收站恢复 ──
     @PostMapping("/restore/{backupId}")
     @SuppressWarnings("unchecked")

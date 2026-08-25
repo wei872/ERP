@@ -338,7 +338,8 @@ INSERT IGNORE INTO sys_no_rule(rule_key, rule_name, prefix, seq_length, remark) 
 ('voucher', '手工凭证号', 'VZ-', 4, '格式：前缀+年月+流水，按月复位'),
 ('sales', '销售订单号', 'SO-', 4, '格式：前缀+年月+流水，按月复位'),
 ('purchase', '采购订单号', 'PO-', 4, '格式：前缀+年月+流水，按月复位'),
-('stockcheck', '盘点单号', 'PD-', 4, '格式：前缀+年月+流水，按月复位');
+('stockcheck', '盘点单号', 'PD-', 4, '格式：前缀+年月+流水，按月复位'),
+('commission', '提成单号', 'TC-', 4, '格式：前缀+年月+流水，按月复位');
 
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('sys_no_rule','单据编号规则','系统维护','编号规则',920);
@@ -377,3 +378,23 @@ INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 -- 状态列字典绑定补齐（前端彩色签 & 写入口校验）
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('trade_sales_main','shipping_status','doc.status');
+
+-- ── 销售提成（v5.26）：按目标达成率阶梯计提，审批后联动工资表 ──
+CREATE TABLE IF NOT EXISTS hr_sales_commission (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  commission_no VARCHAR(50) COMMENT '提成单号',
+  period VARCHAR(10) COMMENT '归属月份 yyyy-MM',
+  salesperson VARCHAR(50) COMMENT '销售人员',
+  target_amount DECIMAL(18,2) COMMENT '目标金额',
+  actual_amount DECIMAL(18,2) COMMENT '实际销售额',
+  achieve_rate DECIMAL(8,2) COMMENT '达成率（%）',
+  rate_pct DECIMAL(8,4) COMMENT '阶梯提成率（%）',
+  commission DECIMAL(18,2) COMMENT '提成金额',
+  status VARCHAR(20) DEFAULT '待审核' COMMENT '待审核/已通过/已同步工资',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_commission_period_person (period, salesperson)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('hr_sales_commission','销售提成','人力资源','薪酬管理',930);
