@@ -542,6 +542,54 @@ insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model',
   ];
   insert('cust_contract_main', ['contract_no', 'contract_name', 'contract_type', 'party_name', 'amount', 'sign_date', 'start_date', 'end_date', 'owner', 'status', 'remark'],
     contracts.map(c => [q(c[0]), q(c[1]), q(c[2]), q(c[3]), money(c[4]), dAgo(c[5]), dAgo(c[6]), c[7], q(c[8]), q(c[9]), q('')]));
+
+  // ── 收款计划（v5.28）：销售合同三期 40/30/30，含已收/部分收/逾期样例 ──
+  const planRows = [];
+  const mk = (no, amt) => {
+    const t1 = Math.round(amt * 0.4 * 100) / 100, t2 = Math.round(amt * 0.3 * 100) / 100, t3 = Math.round((amt - amt * 0.4 - amt * 0.3) * 100) / 100;
+    return [t1, t2, t3];
+  };
+  {
+    const [a1, a2, a3] = mk('x', 1200000);
+    planRows.push([q('CT-2026-001'), 1, dAgo(60), money(a1), money(a1), q('已收款'), q('首付款')]);
+    planRows.push([q('CT-2026-001'), 2, dAgo(20), money(a2), money(Math.round(a2 * 0.5 * 100) / 100), q('部分收款'), q('到货款，剩余分次支付')]);
+    planRows.push([q('CT-2026-001'), 3, dPlus(40), money(a3), '0.00', q('未收款'), q('质保金')]);
+  }
+  {
+    const [a1, a2, a3] = mk('x', 460000);
+    planRows.push([q('CT-2026-002'), 1, dAgo(25), money(a1), '0.00', q('未收款'), q('已逾期，催收中')]);
+    planRows.push([q('CT-2026-002'), 2, dPlus(35), money(a2), '0.00', q('未收款'), q('')]);
+    planRows.push([q('CT-2026-002'), 3, dPlus(95), money(a3), '0.00', q('未收款'), q('')]);
+  }
+  {
+    const [a1, a2, a3] = mk('x', 820000);
+    planRows.push([q('CT-2026-003'), 1, dAgo(45), money(a1), money(a1), q('已收款'), q('预付款')]);
+    planRows.push([q('CT-2026-003'), 2, dPlus(15), money(a2), '0.00', q('未收款'), q('')]);
+    planRows.push([q('CT-2026-003'), 3, dPlus(110), money(a3), '0.00', q('未收款'), q('')]);
+  }
+  {
+    const [a1, a2, a3] = mk('x', 350000);
+    planRows.push([q('CT-2026-004'), 1, dAgo(90), money(a1), money(a1), q('已收款'), q('')]);
+    planRows.push([q('CT-2026-004'), 2, dAgo(50), money(a2), money(a2), q('已收款'), q('')]);
+    planRows.push([q('CT-2026-004'), 3, dAgo(15), money(a3), money(a3), q('已收款'), q('')]);
+  }
+  {
+    const [a1, a2, a3] = mk('x', 540000);
+    planRows.push([q('CT-2025-018'), 1, dAgo(400), money(a1), money(a1), q('已收款'), q('')]);
+    planRows.push([q('CT-2025-018'), 2, dAgo(310), money(a2), money(a2), q('已收款'), q('')]);
+    planRows.push([q('CT-2025-018'), 3, dAgo(220), money(a3), money(a3), q('已收款'), q('')]);
+  }
+  insert('cust_contract_payment_plan', ['contract_no', 'term_no', 'due_date', 'plan_amount', 'received_amount', 'status', 'remark'], planRows);
+
+  // ── 开票登记（v5.28）──
+  insert('cust_contract_invoice', ['invoice_no', 'contract_no', 'invoice_type', 'invoice_date', 'amount', 'tax_rate', 'status', 'remark'], [
+    ['INV-202604-00001', 'CT-2026-001', q('增值税专票'), dAgo(58), money(480000), '13.00', q('已开具'), q('首期货款开票')],
+    ['INV-202605-00002', 'CT-2026-001', q('增值税专票'), dAgo(18), money(180000), '13.00', q('已开具'), q('到货款部分开票')],
+    ['INV-202604-00003', 'CT-2026-003', q('增值税专票'), dAgo(44), money(328000), '13.00', q('已开具'), q('预付款开票')],
+    ['INV-202603-00004', 'CT-2026-004', q('增值税普票'), dAgo(88), money(350000), '13.00', q('已开具'), q('全额开票')],
+    ['INV-202602-00005', 'CT-2025-018', q('增值税专票'), dAgo(230), money(540000), '13.00', q('已开具'), q('已结清合同全额开票')],
+    ['INV-202604-00006', 'CT-2026-002', q('增值税专票'), dAgo(24), money(184000), '13.00', q('已作废'), q('开票信息有误，作废重开')],
+  ].map(r => [q(r[0]), q(r[1]), r[2], r[3], r[4], r[5], r[6], r[7]]));
 }
 
 // ── 销售退货单（已出库销售的部分退货样例） ──

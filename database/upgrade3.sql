@@ -424,7 +424,39 @@ INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('quality_ncr','status','ncr.status');
 
 INSERT IGNORE INTO sys_no_rule(rule_key, rule_name, prefix, seq_length, remark) VALUES
-('ncr', '质量异常单号', 'NCR-', 4, '格式：前缀+年月+流水，按月复位');
+('ncr', '质量异常单号', 'NCR-', 4, '格式：前缀+年月+流水，按月复位'),
+('invoice', '发票号码', 'INV-', 5, '格式：前缀+年月+流水，按月复位');
+
+-- ── 合同收款计划与开票管理（v5.28）──
+CREATE TABLE IF NOT EXISTS cust_contract_payment_plan (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  contract_no VARCHAR(50) COMMENT '合同号',
+  term_no INT COMMENT '期数',
+  due_date DATE COMMENT '应收日期',
+  plan_amount DECIMAL(18,2) COMMENT '计划金额',
+  received_amount DECIMAL(18,2) DEFAULT 0 COMMENT '已收金额',
+  status VARCHAR(20) DEFAULT '未收款' COMMENT '未收款/部分收款/已收款/已逾期',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_plan_contract_term (contract_no, term_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS cust_contract_invoice (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  invoice_no VARCHAR(50) COMMENT '发票号码',
+  contract_no VARCHAR(50) COMMENT '合同号',
+  invoice_type VARCHAR(30) DEFAULT '增值税专票' COMMENT '增值税专票/增值税普票',
+  invoice_date DATE,
+  amount DECIMAL(18,2) COMMENT '开票金额',
+  tax_rate DECIMAL(5,2) DEFAULT 13 COMMENT '税率%',
+  status VARCHAR(20) DEFAULT '已开具' COMMENT '已开具/已作废',
+  remark TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('cust_contract_payment_plan','合同收款计划','客户供应商','合同档案',932),
+('cust_contract_invoice','合同开票登记','客户供应商','合同档案',933);
 
 -- ── 销售提成（v5.26）：按目标达成率阶梯计提，审批后联动工资表 ──
 CREATE TABLE IF NOT EXISTS hr_sales_commission (

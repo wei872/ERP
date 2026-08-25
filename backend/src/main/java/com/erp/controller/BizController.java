@@ -234,7 +234,7 @@ public class BizController {
 
     // ── 库存直接出入库（不走主从表，便于库存盘点快速调账）──
     @PostMapping("/stock-in") public Result stockIn(@RequestBody Map<String,Object> body, HttpServletRequest req) {
-        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        if (!"admin".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
         try {
             if (val(body.get("product_code")).isEmpty()) return Result.error("商品编码不能为空");
             inventory.stockIn(
@@ -251,7 +251,7 @@ public class BizController {
     }
 
     @PostMapping("/stock-out") public Result stockOut(@RequestBody Map<String,Object> body, HttpServletRequest req) {
-        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        if (!"admin".equals(role(req)) && !"warehouse".equals(role(req))) return Result.error("权限不足");
         try {
             if (val(body.get("product_code")).isEmpty()) return Result.error("商品编码不能为空");
             inventory.stockOut(
@@ -393,6 +393,10 @@ public class BizController {
                 cts.put("expiring", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status IN ('执行中','草稿') AND end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)", Long.class));
                 cts.put("expired", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status='执行中' AND end_date<CURDATE()", Long.class));
                 ret.put("expiringContracts", cts);
+            } catch (Exception ignored) {}
+            // 收款计划逾期提醒（v5.28）
+            try {
+                ret.put("overduePlans", db.queryForObject("SELECT COUNT(*) FROM cust_contract_payment_plan WHERE due_date<CURDATE() AND status NOT IN ('已收款')", Long.class));
             } catch (Exception ignored) {}
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("待办加载失败: " + e.getMessage()); }
@@ -1258,6 +1262,266 @@ public class BizController {
                 return Result.ok("复检不合格，异常单回到「处置中」重新处置");
             }
         } catch (Exception e) { return Result.error("复检失败: " + e.getMessage()); }
+    }
+
+    // ── 供应商记分卡（v5.28）：交期 40% + 质量 40% + 价格 20%，星级榜单 ──
+    @GetMapping("/supplier-scorecard") public Result supplierScorecard() {
+        try {
+            List<Map<String,Object>> suppliers = db.queryForList("SELECT supplier_code, supplier_name, supplier_type, level FROM supp_supplier_main ORDER BY supplier_code LIMIT 200");
+            // 质量合格率（来料检验）
+            Map<String, Map<String,Object>> quality = new LinkedHashMap<>();
+            for (Map<String,Object> r : db.queryForList("SELECT supplier_name, COALESCE(SUM(sample_qty),0) s, COALESCE(SUM(pass_qty),0) p FROM quality_incoming GROUP BY supplier_name"))
+                quality.put(String.valueOf(r.get("supplier_name")), r);
+            // 价格竞争力：每个商品各供应商均价，与最低价比较
+            List<Map<String,Object>> priceAgg = db.queryForList(
+                "SELECT d.product_code, m.supplier_code, AVG(d.unit_price) avgp FROM trade_purchase_detail d " +
+                "JOIN trade_purchase_main m ON d.purchase_no=m.purchase_no WHERE d.unit_price>0 GROUP BY d.product_code, m.supplier_code");
+            Map<String, java.math.BigDecimal> bestByProduct = new LinkedHashMap<>();
+            for (Map<String,Object> r : priceAgg) {
+                java.math.BigDecimal avg = bd(r.get("avgp"));
+                bestByProduct.merge(String.valueOf(r.get("product_code")), avg, java.math.BigDecimal::min);
+            }
+            Map<String, List<java.math.BigDecimal>> ratios = new LinkedHashMap<>();
+            for (Map<String,Object> r : priceAgg) {
+                java.math.BigDecimal best = bestByProduct.get(String.valueOf(r.get("product_code")));
+                java.math.BigDecimal avg = bd(r.get("avgp"));
+                if (best != null && avg.signum() > 0) {
+                    ratios.computeIfAbsent(String.valueOf(r.get("supplier_code")), k -> new ArrayList<>())
+                        .add(best.divide(avg, 4, java.math.RoundingMode.HALF_UP));
+                }
+            }
+            List<Map<String,Object>> rows = new ArrayList<>();
+            for (Map<String,Object> s : suppliers) {
+                String code = String.valueOf(s.get("supplier_code"));
+                String name = String.valueOf(s.get("supplier_name"));
+                Map<String,Object> row = new LinkedHashMap<>(s);
+                Map<String,Object> o = db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(total_amount),0) amt, " +
+                    "SUM(CASE WHEN arrival_status='全部到货' THEN 1 ELSE 0 END) arrived FROM trade_purchase_main WHERE supplier_code=?", code).get(0);
+                long cnt = ((Number) o.get("cnt")).longValue();
+                row.put("order_cnt", cnt);
+                row.put("order_amount", bd(o.get("amt")));
+                java.math.BigDecimal delivery = null, qualityRate = null, priceScore = null;
+                if (cnt > 0) delivery = new java.math.BigDecimal(((Number) o.get("arrived")).longValue())
+                    .multiply(new java.math.BigDecimal("100")).divide(new java.math.BigDecimal(cnt), 1, java.math.RoundingMode.HALF_UP);
+                Map<String,Object> qr = quality.get(name);
+                if (qr != null && ((Number) qr.get("s")).longValue() > 0)
+                    qualityRate = new java.math.BigDecimal(((Number) qr.get("p")).longValue())
+                        .multiply(new java.math.BigDecimal("100")).divide(new java.math.BigDecimal(((Number) qr.get("s")).longValue()), 1, java.math.RoundingMode.HALF_UP);
+                List<java.math.BigDecimal> rs = ratios.get(code);
+                if (rs != null && !rs.isEmpty()) {
+                    java.math.BigDecimal sum = java.math.BigDecimal.ZERO;
+                    for (java.math.BigDecimal b : rs) sum = sum.add(b);
+                    priceScore = sum.divide(new java.math.BigDecimal(rs.size()), 4, java.math.RoundingMode.HALF_UP)
+                        .multiply(new java.math.BigDecimal("100")).setScale(1, java.math.RoundingMode.HALF_UP);
+                    if (priceScore.compareTo(new java.math.BigDecimal("100")) > 0) priceScore = new java.math.BigDecimal("100.0");
+                }
+                // 加权总分（仅对可用维度归一化，避免缺数据被低估）
+                double wSum = 0, vSum = 0;
+                if (delivery != null) { wSum += 0.4; vSum += 0.4 * delivery.doubleValue(); }
+                if (qualityRate != null) { wSum += 0.4; vSum += 0.4 * qualityRate.doubleValue(); }
+                if (priceScore != null) { wSum += 0.2; vSum += 0.2 * priceScore.doubleValue(); }
+                java.math.BigDecimal total = wSum > 0
+                    ? new java.math.BigDecimal(vSum / wSum).setScale(1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO;
+                int stars = total.doubleValue() >= 90 ? 5 : total.doubleValue() >= 80 ? 4 : total.doubleValue() >= 70 ? 3 : total.doubleValue() >= 60 ? 2 : 1;
+                row.put("delivery_rate", delivery);
+                row.put("quality_rate", qualityRate);
+                row.put("price_score", priceScore);
+                row.put("total_score", cnt == 0 && qualityRate == null && priceScore == null ? null : total);
+                row.put("stars", cnt == 0 && qualityRate == null && priceScore == null ? 0 : stars);
+                row.put("grade", stars == 5 ? "A" : stars == 4 ? "B" : stars == 3 ? "C" : stars >= 1 ? "D" : "—");
+                rows.add(row);
+            }
+            rows.sort((a, b) -> bd(b.get("total_score")).compareTo(bd(a.get("total_score"))));
+            return Result.ok(rows);
+        } catch (Exception e) { return Result.error("供应商记分卡加载失败: " + e.getMessage()); }
+    }
+
+    // ── 质量成本分析 COQ（v5.28）：报废/检验失败/异常单损失按月与来源聚合 ──
+    @GetMapping("/coq-analysis") public Result coqAnalysis() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            // 单价参照：库存余额单位成本，缺失回退商品采购价
+            Map<String, java.math.BigDecimal> costMap = new LinkedHashMap<>();
+            for (Map<String,Object> r : db.queryForList("SELECT product_code, AVG(unit_cost) c FROM trade_inventory_balance WHERE unit_cost>0 GROUP BY product_code"))
+                costMap.put(String.valueOf(r.get("product_code")), bd(r.get("c")));
+            for (Map<String,Object> r : db.queryForList("SELECT product_code, purchase_price c FROM trade_goods_main WHERE purchase_price>0"))
+                costMap.putIfAbsent(String.valueOf(r.get("product_code")), bd(r.get("c")));
+            // 生产报废损失（按月）
+            List<Map<String,Object>> scrap = db.queryForList("SELECT DATE_FORMAT(scrap_date,'%Y-%m') month, product_code, scrap_qty FROM prod_scrap_main WHERE scrap_qty>0");
+            // 检验失败损失（按月）
+            List<Map<String,Object>> insp = db.queryForList("SELECT DATE_FORMAT(inspection_date,'%Y-%m') month, product_code, (sample_qty-pass_qty) fq FROM quality_inspection_main WHERE sample_qty>pass_qty");
+            // NCR 报废损失（按月）
+            List<Map<String,Object>> ncrScrap = db.queryForList("SELECT DATE_FORMAT(report_date,'%Y-%m') month, product_code, qty FROM quality_ncr WHERE handling='报废' AND qty>0");
+            Map<String, java.math.BigDecimal> monthly = new LinkedHashMap<>();
+            java.math.BigDecimal scrapLoss = java.math.BigDecimal.ZERO, inspLoss = java.math.BigDecimal.ZERO, ncrLoss = java.math.BigDecimal.ZERO;
+            Map<String, java.math.BigDecimal> byProduct = new LinkedHashMap<>();
+            for (List<Map<String,Object>> src : java.util.Arrays.asList(scrap, insp, ncrScrap)) {
+                boolean isScrap = src == scrap, isInsp = src == insp;
+                for (Map<String,Object> r : src) {
+                    String code = String.valueOf(r.get("product_code"));
+                    java.math.BigDecimal qty = bd(r.get(isInsp ? "fq" : (isScrap ? "scrap_qty" : "qty")));
+                    java.math.BigDecimal unit = costMap.getOrDefault(code, java.math.BigDecimal.ZERO);
+                    java.math.BigDecimal loss = qty.multiply(unit).setScale(2, java.math.RoundingMode.HALF_UP);
+                    monthly.merge(String.valueOf(r.get("month")), loss, java.math.BigDecimal::add);
+                    byProduct.merge(code, loss, java.math.BigDecimal::add);
+                    if (isScrap) scrapLoss = scrapLoss.add(loss);
+                    else if (isInsp) inspLoss = inspLoss.add(loss);
+                    else ncrLoss = ncrLoss.add(loss);
+                }
+            }
+            List<Map<String,Object>> monthlyRows = new ArrayList<>();
+            for (Map.Entry<String, java.math.BigDecimal> e : monthly.entrySet()) {
+                Map<String,Object> m = new LinkedHashMap<>();
+                m.put("month", e.getKey()); m.put("loss", e.getValue());
+                monthlyRows.add(m);
+            }
+            monthlyRows.sort((a, b) -> String.valueOf(a.get("month")).compareTo(String.valueOf(b.get("month"))));
+            if (monthlyRows.size() > 8) monthlyRows = monthlyRows.subList(monthlyRows.size() - 8, monthlyRows.size());
+            List<Map.Entry<String, java.math.BigDecimal>> top = new ArrayList<>(byProduct.entrySet());
+            top.sort((a, b) -> b.getValue().compareTo(a.getValue()));
+            List<Map<String,Object>> topRows = new ArrayList<>();
+            for (int i = 0; i < Math.min(8, top.size()); i++) {
+                Map<String,Object> t = new LinkedHashMap<>();
+                t.put("product_code", top.get(i).getKey());
+                t.put("loss", top.get(i).getValue());
+                topRows.add(t);
+            }
+            // 报废率：报废数量 / 生产产量
+            java.math.BigDecimal scrapQty = db.queryForObject("SELECT COALESCE(SUM(scrap_qty),0) FROM prod_scrap_main", java.math.BigDecimal.class);
+            java.math.BigDecimal output = db.queryForObject("SELECT COALESCE(SUM(actual_qty),0) FROM prod_work_order", java.math.BigDecimal.class);
+            java.math.BigDecimal sales = db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_sales_main", java.math.BigDecimal.class);
+            java.math.BigDecimal totalLoss = scrapLoss.add(inspLoss).add(ncrLoss);
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("total_loss", totalLoss);
+            totals.put("scrap_loss", scrapLoss);
+            totals.put("inspection_loss", inspLoss);
+            totals.put("ncr_scrap_loss", ncrLoss);
+            totals.put("scrap_rate", scrapQty != null && output != null && output.signum() > 0
+                ? scrapQty.multiply(new java.math.BigDecimal("100")).divide(output, 2, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+            totals.put("loss_to_sales", sales != null && sales.signum() > 0
+                ? totalLoss.multiply(new java.math.BigDecimal("100")).divide(sales, 2, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+            totals.put("ncr_count", db.queryForObject("SELECT COUNT(*) FROM quality_ncr", Long.class));
+            totals.put("rework_count", db.queryForObject("SELECT COUNT(*) FROM quality_ncr WHERE handling='返工'", Long.class));
+            totals.put("concession_count", db.queryForObject("SELECT COUNT(*) FROM quality_ncr WHERE handling='让步接收'", Long.class));
+            ret.put("totals", totals);
+            ret.put("monthly", monthlyRows);
+            ret.put("topProducts", topRows);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("质量成本分析加载失败: " + e.getMessage()); }
+    }
+
+    // ── 合同收款计划（v5.28）：生成/追加/收款，逾期自动进待办 ──
+    @GetMapping("/contract-plan/list") public Result contractPlanList(@RequestParam String contract_no) {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("plans", db.queryForList("SELECT * FROM cust_contract_payment_plan WHERE contract_no=? ORDER BY term_no", contract_no));
+            ret.put("invoices", db.queryForList("SELECT * FROM cust_contract_invoice WHERE contract_no=? ORDER BY invoice_date DESC, id DESC", contract_no));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("收款计划加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/contract-plan/generate")
+    @Transactional
+    public Result contractPlanGenerate(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String no = String.valueOf(body.getOrDefault("contract_no", "")).trim();
+            int terms = body.get("terms") == null ? 3 : Integer.parseInt(String.valueOf(body.get("terms")));
+            String firstDate = String.valueOf(body.getOrDefault("first_date", "")).trim();
+            if (no.isEmpty() || terms < 1 || terms > 24) return Result.error("合同号必填，期数须为 1~24");
+            List<Map<String,Object>> cs = db.queryForList("SELECT amount, party_name, contract_type FROM cust_contract_main WHERE contract_no=?", no);
+            if (cs.isEmpty()) return Result.error("合同不存在: " + no);
+            if (!String.valueOf(cs.get(0).getOrDefault("contract_type", "")).contains("销售")) return Result.error("收款计划仅支持销售合同");
+            Long exists = db.queryForObject("SELECT COUNT(*) FROM cust_contract_payment_plan WHERE contract_no=?", Long.class, no);
+            if (exists != null && exists > 0) return Result.error("该合同已有收款计划，请使用「追加期数」");
+            java.math.BigDecimal amount = bd(cs.get(0).get("amount"));
+            if (amount.signum() <= 0) return Result.error("合同金额无效，无法拆分");
+            java.math.BigDecimal per = amount.divide(new java.math.BigDecimal(terms), 2, java.math.RoundingMode.DOWN);
+            java.math.BigDecimal allocated = per.multiply(new java.math.BigDecimal(terms - 1));
+            String base = firstDate.isEmpty() ? db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m-%d')", String.class) : firstDate;
+            for (int i = 1; i <= terms; i++) {
+                java.math.BigDecimal amt = i == terms ? amount.subtract(allocated) : per;
+                db.update("INSERT INTO cust_contract_payment_plan(contract_no,term_no,due_date,plan_amount,received_amount,status,remark) VALUES(?,?,DATE_ADD(?,INTERVAL ? MONTH),?,0,'未收款',?)",
+                    no, i, base, (i - 1) * 3, amt, "自动生成" + terms + "期均摊");
+            }
+            audit.log(user(req), "合同", "生成收款计划", no + " " + terms + "期 ¥" + amount, audit.getIp(req));
+            return Result.ok("已生成 " + terms + " 期收款计划");
+        } catch (Exception e) { return Result.error("生成收款计划失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/contract-plan/add") public Result contractPlanAdd(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String no = String.valueOf(body.getOrDefault("contract_no", "")).trim();
+            String due = String.valueOf(body.getOrDefault("due_date", "")).trim();
+            java.math.BigDecimal amt = body.get("plan_amount") == null ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(String.valueOf(body.get("plan_amount")));
+            if (no.isEmpty() || due.isEmpty() || amt.signum() <= 0) return Result.error("合同号/应收日期/金额必填");
+            Integer maxTerm = db.queryForObject("SELECT COALESCE(MAX(term_no),0) FROM cust_contract_payment_plan WHERE contract_no=?", Integer.class, no);
+            db.update("INSERT INTO cust_contract_payment_plan(contract_no,term_no,due_date,plan_amount,received_amount,status,remark) VALUES(?,?,?,?,0,'未收款',?)",
+                no, (maxTerm == null ? 0 : maxTerm) + 1, due, amt, String.valueOf(body.getOrDefault("remark", "手动追加")));
+            audit.log(user(req), "合同", "追加收款期数", no + " 第" + ((maxTerm == null ? 0 : maxTerm) + 1) + "期 ¥" + amt, audit.getIp(req));
+            return Result.ok("已追加一期收款计划");
+        } catch (Exception e) { return Result.error("追加期数失败: " + e.getMessage()); }
+    }
+
+    /** 收款登记：更新计划进度 + 同步生成收款流水（finance_income_main），业财一致 */
+    @PostMapping("/contract-plan/collect")
+    @Transactional
+    public Result contractPlanCollect(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req)) && !"sales".equals(role(req))) return Result.error("权限不足");
+        try {
+            long id = Long.parseLong(String.valueOf(body.get("id")));
+            java.math.BigDecimal amt = body.get("amount") == null ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(String.valueOf(body.get("amount")));
+            List<Map<String,Object>> rows = db.queryForList("SELECT * FROM cust_contract_payment_plan WHERE id=?", id);
+            if (rows.isEmpty()) return Result.error("收款计划不存在");
+            Map<String,Object> p = rows.get(0);
+            java.math.BigDecimal remain = bd(p.get("plan_amount")).subtract(bd(p.get("received_amount")));
+            if (amt.signum() <= 0 || amt.compareTo(remain) > 0) return Result.error("收款金额须在 0.01 ~ " + remain + "（本期未收余额）之间");
+            java.math.BigDecimal received = bd(p.get("received_amount")).add(amt);
+            String status = received.compareTo(bd(p.get("plan_amount"))) >= 0 ? "已收款" : "部分收款";
+            db.update("UPDATE cust_contract_payment_plan SET received_amount=?, status=? WHERE id=?", received, status, id);
+            // 业财联动：收款流水入账
+            String contractNo = String.valueOf(p.get("contract_no"));
+            String party = "";
+            try { party = String.valueOf(db.queryForList("SELECT party_name FROM cust_contract_main WHERE contract_no=?", contractNo).get(0).get("party_name")); } catch (Exception ignored) {}
+            String incomeNo = "RCV-" + System.currentTimeMillis();
+            db.update("INSERT INTO finance_income_main(income_no,income_type,customer_code,customer_name,amount,account,income_date,handler,status,remark) VALUES(?,'合同回款',?,?,?, '银行转账',CURDATE(),?,'已到账',?)",
+                incomeNo, "", party, amt, user(req), "合同" + contractNo + "第" + p.get("term_no") + "期回款");
+            audit.log(user(req), "合同", "收款登记", contractNo + "第" + p.get("term_no") + "期 ¥" + amt, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("status", status); ret.put("income_no", incomeNo);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("收款登记失败: " + e.getMessage()); }
+    }
+
+    // ── 合同开票登记（v5.28）──
+    @PostMapping("/invoice/create") public Result invoiceCreate(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req)) && !"sales".equals(role(req))) return Result.error("权限不足");
+        try {
+            String no = String.valueOf(body.getOrDefault("contract_no", "")).trim();
+            java.math.BigDecimal amt = body.get("amount") == null ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(String.valueOf(body.get("amount")));
+            if (no.isEmpty() || amt.signum() <= 0) return Result.error("合同号与开票金额必填");
+            String invoiceNo;
+            try { invoiceNo = noRule.nextNo("invoice"); } catch (Exception e) { invoiceNo = "INV-" + System.currentTimeMillis(); }
+            String date = String.valueOf(body.getOrDefault("invoice_date", "")).trim();
+            db.update("INSERT INTO cust_contract_invoice(invoice_no,contract_no,invoice_type,invoice_date,amount,tax_rate,status,remark) VALUES(?,?,?,?,?,?,'已开具',?)",
+                invoiceNo, no, String.valueOf(body.getOrDefault("invoice_type", "增值税专票")), date.isEmpty() ? new java.sql.Date(System.currentTimeMillis()) : date,
+                amt, body.get("tax_rate") == null ? new java.math.BigDecimal("13") : new java.math.BigDecimal(String.valueOf(body.get("tax_rate"))), String.valueOf(body.getOrDefault("remark", "")));
+            audit.log(user(req), "合同", "开票登记", invoiceNo + " " + no + " ¥" + amt, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("invoice_no", invoiceNo);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("开票登记失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/invoice/void/{id}") public Result invoiceVoid(@PathVariable Long id, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            int n = db.update("UPDATE cust_contract_invoice SET status='已作废' WHERE id=? AND status='已开具'", id);
+            if (n == 0) return Result.error("发票不存在或已作废");
+            audit.log(user(req), "合同", "发票作废", "id=" + id, audit.getIp(req));
+            return Result.ok("发票已作废");
+        } catch (Exception e) { return Result.error("作废失败: " + e.getMessage()); }
     }
 
     // ── 回收站恢复 ──

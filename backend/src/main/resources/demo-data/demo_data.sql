@@ -1029,6 +1029,29 @@ INSERT IGNORE INTO cust_contract_main (contract_no,contract_name,contract_type,p
 ('CT-2025-015','包装材料采购合同','采购合同','佛山包装材料厂',86000.00,DATE_SUB(CURDATE(), INTERVAL 420 DAY),DATE_SUB(CURDATE(), INTERVAL 410 DAY),DATE_SUB(CURDATE(), INTERVAL 60 DAY),'周八','已完结',''),
 ('CT-2026-007','北方自动化试点合同','销售合同','北方自动化设备公司',150000.00,DATE_SUB(CURDATE(), INTERVAL 40 DAY),DATE_SUB(CURDATE(), INTERVAL 30 DAY),DATE_ADD(CURDATE(), INTERVAL 150 DAY),'张三','草稿',''),
 ('CT-2025-011','旧产线改造合同','销售合同','深港电子科技公司',220000.00,DATE_SUB(CURDATE(), INTERVAL 560 DAY),DATE_SUB(CURDATE(), INTERVAL 550 DAY),DATE_SUB(CURDATE(), INTERVAL 200 DAY),'张三','已终止','');
+INSERT IGNORE INTO cust_contract_payment_plan (contract_no,term_no,due_date,plan_amount,received_amount,status,remark) VALUES
+('CT-2026-001',1,DATE_SUB(CURDATE(), INTERVAL 60 DAY),480000.00,480000.00,'已收款','首付款'),
+('CT-2026-001',2,DATE_SUB(CURDATE(), INTERVAL 20 DAY),360000.00,180000.00,'部分收款','到货款，剩余分次支付'),
+('CT-2026-001',3,DATE_ADD(CURDATE(), INTERVAL 40 DAY),360000.00,0.00,'未收款','质保金'),
+('CT-2026-002',1,DATE_SUB(CURDATE(), INTERVAL 25 DAY),184000.00,0.00,'未收款','已逾期，催收中'),
+('CT-2026-002',2,DATE_ADD(CURDATE(), INTERVAL 35 DAY),138000.00,0.00,'未收款',''),
+('CT-2026-002',3,DATE_ADD(CURDATE(), INTERVAL 95 DAY),138000.00,0.00,'未收款',''),
+('CT-2026-003',1,DATE_SUB(CURDATE(), INTERVAL 45 DAY),328000.00,328000.00,'已收款','预付款'),
+('CT-2026-003',2,DATE_ADD(CURDATE(), INTERVAL 15 DAY),246000.00,0.00,'未收款',''),
+('CT-2026-003',3,DATE_ADD(CURDATE(), INTERVAL 110 DAY),246000.00,0.00,'未收款',''),
+('CT-2026-004',1,DATE_SUB(CURDATE(), INTERVAL 90 DAY),140000.00,140000.00,'已收款',''),
+('CT-2026-004',2,DATE_SUB(CURDATE(), INTERVAL 50 DAY),105000.00,105000.00,'已收款',''),
+('CT-2026-004',3,DATE_SUB(CURDATE(), INTERVAL 15 DAY),105000.00,105000.00,'已收款',''),
+('CT-2025-018',1,DATE_SUB(CURDATE(), INTERVAL 400 DAY),216000.00,216000.00,'已收款',''),
+('CT-2025-018',2,DATE_SUB(CURDATE(), INTERVAL 310 DAY),162000.00,162000.00,'已收款',''),
+('CT-2025-018',3,DATE_SUB(CURDATE(), INTERVAL 220 DAY),162000.00,162000.00,'已收款','');
+INSERT IGNORE INTO cust_contract_invoice (invoice_no,contract_no,invoice_type,invoice_date,amount,tax_rate,status,remark) VALUES
+('INV-202604-00001','CT-2026-001','增值税专票',DATE_SUB(CURDATE(), INTERVAL 58 DAY),480000.00,13.00,'已开具','首期货款开票'),
+('INV-202605-00002','CT-2026-001','增值税专票',DATE_SUB(CURDATE(), INTERVAL 18 DAY),180000.00,13.00,'已开具','到货款部分开票'),
+('INV-202604-00003','CT-2026-003','增值税专票',DATE_SUB(CURDATE(), INTERVAL 44 DAY),328000.00,13.00,'已开具','预付款开票'),
+('INV-202603-00004','CT-2026-004','增值税普票',DATE_SUB(CURDATE(), INTERVAL 88 DAY),350000.00,13.00,'已开具','全额开票'),
+('INV-202602-00005','CT-2025-018','增值税专票',DATE_SUB(CURDATE(), INTERVAL 230 DAY),540000.00,13.00,'已开具','已结清合同全额开票'),
+('INV-202604-00006','CT-2026-002','增值税专票',DATE_SUB(CURDATE(), INTERVAL 24 DAY),184000.00,13.00,'已作废','开票信息有误，作废重开');
 INSERT IGNORE INTO trade_sales_return (return_no,ref_sales_no,customer_code,customer_name,return_date,return_reason,total_amount,handler,status,remark) VALUES
 ('SR-D-001','SO-0001','C-002','南方物联科技公司',DATE_SUB(CURDATE(), INTERVAL 242 DAY),'外观瑕疵退货',2350.00,'李四','已入库','退货:FG-003 x1'),
 ('SR-D-002','SO-0002','C-002','南方物联科技公司',DATE_SUB(CURDATE(), INTERVAL 242 DAY),'客户订单变更退货',2350.00,'李四','已入库','退货:FG-003 x1');
