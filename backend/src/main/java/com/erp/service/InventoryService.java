@@ -275,11 +275,18 @@ public class InventoryService {
                 String spec = String.valueOf(d.getOrDefault("spec_model", ""));
                 BigDecimal qty = new BigDecimal(d.getOrDefault("qty", "1").toString());
                 stockOut(pCode, warehouse, qty, salesNo);
-                // 获取商品当前库存成本单价
+                // FIFO 批次成本：自最早批次耗用并取其入库单价；批次无成本数据时回退加权平均价
                 BigDecimal unitCost = BigDecimal.ZERO;
-                List<Map<String,Object>> balRows = db.queryForList("SELECT unit_cost FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", pCode, warehouse);
-                if (!balRows.isEmpty() && balRows.get(0).get("unit_cost") != null) {
-                    unitCost = new BigDecimal(balRows.get(0).get("unit_cost").toString());
+                BigDecimal fifoCost = BigDecimal.ZERO;
+                try { fifoCost = batch.consumeLineForSale(pCode, qty, salesNo); }
+                catch (Exception e) { System.err.println("[batch] FIFO 批次耗用跳过: " + e.getMessage()); }
+                if (fifoCost.signum() > 0) {
+                    unitCost = qty.signum() > 0 ? fifoCost.divide(qty, 4, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+                } else {
+                    List<Map<String,Object>> balRows = db.queryForList("SELECT unit_cost FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", pCode, warehouse);
+                    if (!balRows.isEmpty() && balRows.get(0).get("unit_cost") != null) {
+                        unitCost = new BigDecimal(balRows.get(0).get("unit_cost").toString());
+                    }
                 }
                 BigDecimal lineCost = qty.multiply(unitCost).setScale(2, RoundingMode.HALF_UP);
                 cogsTotal = cogsTotal.add(lineCost);
@@ -289,9 +296,7 @@ public class InventoryService {
         }
 
         db.update("UPDATE trade_sales_main SET shipping_status='已出库', sales_status='已完成' WHERE id=?", saleId);
-
-        // 批次追溯：FIFO 耗用成品批次，记录流向销售单（表不存在时静默降级）
-        try { batch.consumeForSale(salesNo); } catch (Exception e) { System.err.println("[batch] 销售批次耗用跳过: " + e.getMessage()); }
+        // 注：批次 FIFO 耗用已在明细行内按行完成（consumeLineForSale），无需整单重复耗用
 
         // 自动结转销售成本会计凭证 (借: 6401 主营业务成本, 贷: 1405 库存商品)
         String cogsVoucherNo = "";

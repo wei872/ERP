@@ -14,6 +14,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import javax.servlet.http.HttpServletRequest;
@@ -569,6 +570,60 @@ public class BizController {
             ret.put("recentApprovals", db.queryForList("SELECT approval_no, approval_type, applicant, amount, approval_status FROM oa_approval_main ORDER BY id DESC LIMIT 5"));
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("日报加载失败: " + e.getMessage()); }
+    }
+
+    // ── 报价单：审批 + 一键转销售订单 ──
+    @PostMapping("/quote-approve/{quoteNo}") public Result quoteApprove(@PathVariable String quoteNo, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT audit_status FROM prod_quotation WHERE quote_no=?", quoteNo);
+            if (rows.isEmpty()) return Result.error("报价单不存在: " + quoteNo);
+            String st = String.valueOf(rows.get(0).get("audit_status"));
+            if ("已转订单".equals(st)) return Result.error("该报价单已转订单，不可重复审批");
+            db.update("UPDATE prod_quotation SET audit_status='已通过' WHERE quote_no=?", quoteNo);
+            audit.log(user(req), "销售", "报价审批", quoteNo, audit.getIp(req));
+            return Result.ok("已审批");
+        } catch (Exception e) { return Result.error("审批失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/quote-to-sale/{quoteNo}")
+    @Transactional
+    public Result quoteToSale(@PathVariable String quoteNo, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req))) return Result.error("权限不足");
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT * FROM prod_quotation WHERE quote_no=?", quoteNo);
+            if (rows.isEmpty()) return Result.error("报价单不存在: " + quoteNo);
+            Map<String,Object> q = rows.get(0);
+            String st = String.valueOf(q.get("audit_status"));
+            if (!"已通过".equals(st)) return Result.error("仅「已通过」的报价单可转订单，当前状态：" + st);
+            String salesNo = "SO-Q-" + System.currentTimeMillis();
+            java.math.BigDecimal qty = new java.math.BigDecimal(String.valueOf(q.getOrDefault("qty", "1")));
+            java.math.BigDecimal price = new java.math.BigDecimal(String.valueOf(q.getOrDefault("quote_price", "0")));
+            java.math.BigDecimal amount = qty.multiply(price).setScale(2, java.math.RoundingMode.HALF_UP);
+            String customerCode = String.valueOf(q.getOrDefault("customer_code", ""));
+            String customerName = String.valueOf(q.getOrDefault("customer_name", ""));
+            db.update("INSERT INTO trade_sales_main(sales_no,customer_code,customer_name,sales_date,total_amount,sales_person,sales_status,shipping_status,warehouse,remark) VALUES(?,?,?,?,?,?,'已审核','未发货','成品仓',?)",
+                salesNo, customerCode, customerName, new java.sql.Date(System.currentTimeMillis()), amount,
+                q.getOrDefault("quote_person", user(req)), "报价单转换:" + quoteNo);
+            db.update("INSERT INTO trade_sales_detail(sales_no,line_no,product_code,product_name,spec_model,qty,unit,unit_price,amount,remark) VALUES(?,1,?,?,?,?,?,?,?,?)",
+                salesNo, q.get("product_code"), q.get("product_name"), q.getOrDefault("spec_model", ""), qty,
+                q.getOrDefault("unit", ""), price, amount, "报价单:" + quoteNo);
+            db.update("UPDATE prod_quotation SET audit_status='已转订单', remark=CONCAT(COALESCE(remark,''),' 已转订单:',?) WHERE quote_no=?", salesNo, quoteNo);
+            // 业财联动：自动生成凭证 + 应收单
+            Long saleId = null;
+            try { saleId = db.queryForObject("SELECT id FROM trade_sales_main WHERE sales_no=?", Long.class, salesNo); } catch (Exception ignored) {}
+            String warn = "";
+            if (saleId != null) {
+                try { finance.generateVoucherFromSale(saleId); } catch (Exception e) { warn = "（凭证自动生成失败，可手动补）"; }
+            }
+            audit.log(user(req), "销售", "报价转订单", quoteNo + "→" + salesNo, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("sales_no", salesNo);
+            ret.put("quote_no", quoteNo);
+            ret.put("amount", amount);
+            ret.put("warning", warn);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("转换失败: " + e.getMessage()); }
     }
 
     // ── 库存盘点：查账面 → 录实盘 → 自动调账 ──

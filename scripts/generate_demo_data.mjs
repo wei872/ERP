@@ -219,7 +219,7 @@ for (let m = 8; m >= 0; m--) {
     p.lines.forEach((l, i) => {
       invIn(m, p.day, l.code, l.qty, l.price, p.no, WH_RAW);
       const bn = `PB-${p.no}-${i + 1}`;
-      liveBatches.push({ no: bn, code: l.code, type: '采购批次', qty: l.qty, remain: l.qty, source_no: p.no, supplier_code: suppliers[p.suppIdx][0], supplier_name: suppliers[p.suppIdx][1], wo: '', components: [], m, day: p.day + 2 });
+      liveBatches.push({ no: bn, code: l.code, type: '采购批次', qty: l.qty, remain: l.qty, source_no: p.no, supplier_code: suppliers[p.suppIdx][0], supplier_name: suppliers[p.suppIdx][1], wo: '', components: [], cost: l.price, m, day: p.day + 2 });
     });
   }
   for (const r of requisitions.filter(x => x.m === m)) {
@@ -231,7 +231,7 @@ for (let m = 8; m >= 0; m--) {
   }
   for (const w of warehouseIns.filter(x => x.m === m)) {
     invIn(m, w.day, w.fg, w.qty, fgCost[w.fg], w.no, WH_FG);
-    liveBatches.push({ no: `MB-${w.wo}`, code: w.fg, type: '生产批次', qty: w.qty, remain: w.qty, source_no: w.wo, supplier_code: '', supplier_name: '', wo: w.wo, components: woComponents[w.wo] || [], m, day: w.day });
+    liveBatches.push({ no: `MB-${w.wo}`, code: w.fg, type: '生产批次', qty: w.qty, remain: w.qty, source_no: w.wo, supplier_code: '', supplier_name: '', wo: w.wo, components: woComponents[w.wo] || [], cost: fgCost[w.fg], m, day: w.day });
   }
   for (const s of sales.filter(x => x.m === m && x.ship === '已出库'))
     for (const l of s.lines) {
@@ -487,6 +487,29 @@ insert('trade_inventory_balance', ['product_code', 'product_name', 'spec_model',
   insert('oa_budget', ['department', 'budget_month', 'budget_amount', 'remark'], budgetRows);
 }
 
+// ── 销售报价单（报价 → 审批 → 转订单流程样例） ──
+{
+  const qt = [
+    ['QT-2026-001', 12, 0, 'FG-001', 20, 1280, '已通过', '张三', '30天'],
+    ['QT-2026-002', 30, 1, 'FG-002', 50, 460, '已转订单', '张三', '30天'],
+    ['QT-2026-003', 5, 5, 'FG-003', 10, 2350, '待审核', '王小明', '45天'],
+    ['QT-2026-004', 20, 2, 'FG-001', 30, 1250, '已通过', '周八', '30天'],
+    ['QT-2026-005', 38, 4, 'FG-002', 80, 450, '已驳回', '张三', '15天'],
+    ['QT-2026-006', 8, 3, 'FG-003', 5, 2300, '已报价', '王小明', '60天'],
+    ['QT-2026-007', 3, 7, 'FG-001', 15, 1280, '待审核', '周八', '30天'],
+    ['QT-2026-008', 45, 6, 'FG-002', 40, 455, '已转订单', '张三', '30天'],
+  ];
+  insert('prod_quotation', ['quote_no', 'quote_date', 'customer_code', 'customer_name', 'product_code', 'product_name', 'spec_model', 'qty', 'unit', 'material_cost', 'labor_cost', 'manufacture_cost', 'manage_cost', 'profit_rate', 'quote_price', 'quote_amount', 'validity', 'quote_person', 'audit_status', 'remark'],
+    qt.map(r => {
+      const [no, daysAgo, custIdx, fg, qty, price, status, person, valid] = r;
+      const c = gmap[fg];
+      const cost = fgCost[fg];
+      const mat = Math.round(cost * 0.8 * 100) / 100, lab = Math.round(cost * 0.12 * 100) / 100, man = Math.round(cost * 0.05 * 100) / 100, adm = Math.round(cost * 0.03 * 100) / 100;
+      const rate = Math.round(((price - cost) / cost) * 10000) / 10000;
+      return [q(no), dAgo(daysAgo), q(customers[custIdx][0]), q(customers[custIdx][1]), q(fg), q(c[1]), q(c[3]), q4(qty), q(c[4]), money(mat * qty), money(lab * qty), money(man * qty), money(adm * qty), String(rate), money(price), money(qty * price), q(valid), q(person), q(status), q(status === '已转订单' ? '已转订单:SO-Q-历史' : '')];
+    }));
+}
+
 // ── 销售目标（近9个月 × 3名销售，随业务增长爬坡） ──
 {
   const targetRows = [];
@@ -526,8 +549,8 @@ insert('trade_warehouse_main', ['warehouse_code', 'warehouse_name', 'warehouse_t
 ]);
 
 // ── 批次追溯台账 + 耗用记录（与出入库回放完全同步生成） ──
-insert('trade_batch_trace', ['batch_no', 'product_code', 'product_name', 'batch_type', 'qty', 'remain_qty', 'source_no', 'supplier_code', 'supplier_name', 'work_order_no', 'component_batches', 'in_date', 'status'],
-  batchRows.map(b => [q(b.no), q(b.code), q(gmap[b.code][1]), q(b.type), q4(b.qty), q4(b.remain), q(b.source_no), q(b.supplier_code), q(b.supplier_name), q(b.wo), q(JSON.stringify(b.components)), dAgo(b.m * 30 + b.day), q(b.remain <= 0 ? '已耗用' : '在库')]));
+insert('trade_batch_trace', ['batch_no', 'product_code', 'product_name', 'batch_type', 'qty', 'remain_qty', 'source_no', 'supplier_code', 'supplier_name', 'work_order_no', 'component_batches', 'in_date', 'status', 'unit_cost'],
+  batchRows.map(b => [q(b.no), q(b.code), q(gmap[b.code][1]), q(b.type), q4(b.qty), q4(b.remain), q(b.source_no), q(b.supplier_code), q(b.supplier_name), q(b.wo), q(JSON.stringify(b.components)), dAgo(b.m * 30 + b.day), q(b.remain <= 0 ? '已耗用' : '在库'), money(b.cost || 0)]));
 insert('trade_batch_consume', ['batch_no', 'product_code', 'consume_qty', 'target_no', 'target_type', 'consume_date'],
   batchConsumeRows.map(c => [q(c.batch_no), q(c.code), q4(c.qty), q(c.targetNo), q(c.targetType), dAgo(c.m * 30 + 15)]));
 

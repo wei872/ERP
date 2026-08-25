@@ -216,6 +216,18 @@ CREATE TABLE IF NOT EXISTS oa_budget (
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('oa_budget','部门预算','协同办公','预算管理',913);
 
+-- ── 批次成本：FIFO 先进先出成本法需要批次入库单价 ──
+SET @c11 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='trade_batch_trace' AND column_name='unit_cost');
+SET @s11 = IF(@c11=0, 'ALTER TABLE trade_batch_trace ADD COLUMN unit_cost DECIMAL(18,4) DEFAULT 0 COMMENT ''批次入库单价（FIFO成本法）''', 'SELECT 1'); PREPARE st11 FROM @s11; EXECUTE st11; DEALLOCATE PREPARE st11;
+
+-- 报价单状态字典
+INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_no) VALUES
+('doc.status','已报价','已报价','blue',43),
+('doc.status','已转订单','已转订单','green',44);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('prod_quotation','audit_status','doc.status');
+
 -- 批次/编码规则表注册进通用菜单与字典
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('trade_batch_trace','批次追溯台账','进销存管理','批次追溯',901),

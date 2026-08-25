@@ -26,7 +26,7 @@ public class BatchService {
         try { return new BigDecimal(v.toString()); } catch (Exception e) { return BigDecimal.ZERO; }
     }
 
-    /** 采购入库创建批次（每行明细一个批次） */
+    /** 采购入库创建批次（每行明细一个批次，记录批次入库单价供 FIFO 成本法） */
     @Transactional
     public void createPurchaseBatches(String purchaseNo) {
         List<Map<String,Object>> po = db.queryForList("SELECT supplier_code, supplier_name FROM trade_purchase_main WHERE purchase_no=?", purchaseNo);
@@ -38,14 +38,14 @@ public class BatchService {
             line++;
             String batchNo = "PB-" + purchaseNo + "-" + line;
             BigDecimal qty = toBD(d.get("qty"));
-            db.update("INSERT IGNORE INTO trade_batch_trace(batch_no,product_code,product_name,batch_type,qty,remain_qty,source_no,supplier_code,supplier_name,in_date,status) VALUES(?,?,?,?,?,?,?,?,?,CURDATE(),'在库')",
-                batchNo, d.get("product_code"), d.get("product_name"), "采购批次", qty, qty, purchaseNo, sc, sn);
+            db.update("INSERT IGNORE INTO trade_batch_trace(batch_no,product_code,product_name,batch_type,qty,remain_qty,source_no,supplier_code,supplier_name,in_date,status,unit_cost) VALUES(?,?,?,?,?,?,?,?,?,CURDATE(),'在库',?)",
+                batchNo, d.get("product_code"), d.get("product_name"), "采购批次", qty, qty, purchaseNo, sc, sn, toBD(d.get("unit_price")));
         }
     }
 
-    /** 生产入库创建生产批次：FIFO 耗用原料批次并记录成分清单 */
+    /** 生产入库创建生产批次：FIFO 耗用原料批次并记录成分清单（带批次成本） */
     @Transactional
-    public void createProductionBatch(String workOrderNo, String productCode, String productName, BigDecimal qty) {
+    public void createProductionBatch(String workOrderNo, String productCode, String productName, BigDecimal qty, BigDecimal unitCost) {
         String batchNo = "MB-" + workOrderNo;
         List<String> consumed = new ArrayList<>();
         try {
@@ -70,16 +70,40 @@ public class BatchService {
             json.append("\"").append(consumed.get(i)).append("\"");
         }
         json.append("]");
-        db.update("INSERT IGNORE INTO trade_batch_trace(batch_no,product_code,product_name,batch_type,qty,remain_qty,source_no,work_order_no,component_batches,in_date,status) VALUES(?,?,?,?,?,?,?,?,?,CURDATE(),'在库')",
-            batchNo, productCode, productName, "生产批次", qty, qty, workOrderNo, workOrderNo, json.toString());
+        db.update("INSERT IGNORE INTO trade_batch_trace(batch_no,product_code,product_name,batch_type,qty,remain_qty,source_no,work_order_no,component_batches,in_date,status,unit_cost) VALUES(?,?,?,?,?,?,?,?,?,CURDATE(),'在库',?)",
+            batchNo, productCode, productName, "生产批次", qty, qty, workOrderNo, workOrderNo, json.toString(), unitCost == null ? BigDecimal.ZERO : unitCost);
     }
 
-    /** 销售出库：FIFO 耗用成品批次，记录流向（销售单 → 客户可查） */
+    /** 销售出库按行耗用：FIFO 消耗批次并返回该行先进先出成本（批次无成本数据时返回 0，由调用方回退加权平均） */
     @Transactional
+    public BigDecimal consumeLineForSale(String productCode, BigDecimal qty, String salesNo) {
+        BigDecimal totalCost = BigDecimal.ZERO;
+        boolean hasCost = false;
+        if (qty == null || qty.signum() <= 0) return BigDecimal.ZERO;
+        List<Map<String,Object>> batches = db.queryForList(
+            "SELECT * FROM trade_batch_trace WHERE product_code=? AND remain_qty>0 ORDER BY in_date ASC, id ASC", productCode);
+        BigDecimal need = qty;
+        for (Map<String,Object> b : batches) {
+            if (need.signum() <= 0) break;
+            String bn = String.valueOf(b.get("batch_no"));
+            BigDecimal remain = toBD(b.get("remain_qty"));
+            BigDecimal take = remain.min(need);
+            BigDecimal after = remain.subtract(take);
+            BigDecimal batchCost = toBD(b.get("unit_cost"));
+            if (batchCost.signum() > 0) { totalCost = totalCost.add(take.multiply(batchCost)); hasCost = true; }
+            db.update("UPDATE trade_batch_trace SET remain_qty=?, status=? WHERE batch_no=?",
+                after, after.signum() == 0 ? "已耗用" : "在库", bn);
+            db.update("INSERT INTO trade_batch_consume(batch_no,product_code,consume_qty,target_no,target_type,consume_date) VALUES(?,?,?,?,?,CURDATE())",
+                bn, productCode, take, salesNo, "销售出库");
+            need = need.subtract(take);
+        }
+        return hasCost ? totalCost : BigDecimal.ZERO;
+    }
+
     public void consumeForSale(String salesNo) {
         List<Map<String,Object>> details = db.queryForList("SELECT product_code, qty FROM trade_sales_detail WHERE sales_no=?", salesNo);
         for (Map<String,Object> d : details) {
-            consumeBatches(String.valueOf(d.get("product_code")), toBD(d.get("qty")), salesNo, "销售出库", new ArrayList<String>());
+            consumeLineForSale(String.valueOf(d.get("product_code")), toBD(d.get("qty")), salesNo);
         }
     }
 

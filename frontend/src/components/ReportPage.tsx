@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BarChart, Bar, PieChart, Pie, Cell, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ComposedChart } from 'recharts';
 import { bizApi } from '../api';
+import { getCurrentCompanyName } from '../utils/company';
 
 type TimePeriod = 'weekly' | 'monthly' | 'yearly';
 const PERIOD_LABELS: Record<TimePeriod, string> = { weekly: '按周(近7天)', monthly: '按月', yearly: '按年' };
@@ -37,6 +38,11 @@ export default function ReportPage() {
   const kpi = data?.kpi || {};
 
   return (<div className="p-6 space-y-6 max-w-[1600px] mx-auto erp-fade-in">
+    {/* 打印专用抬头（屏幕上隐藏） */}
+    <div className="hidden print:block text-center mb-2">
+      <h1 className="text-lg font-bold text-slate-800">{getCurrentCompanyName()} · 经营分析报表（{PERIOD_LABELS[period]}）</h1>
+      <p className="text-xs text-slate-500 mt-1">打印时间：{new Date().toLocaleString('zh-CN')}</p>
+    </div>
     {/* UI 引导与联动卡片（默认收起） */}
     <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 rounded-2xl px-5 py-3 text-white shadow-lg">
       <button onClick={() => setShowGuide(s => !s)} className="w-full flex items-center justify-between text-left">
@@ -72,7 +78,7 @@ export default function ReportPage() {
       </div>}
     </div>
 
-    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h2 className="text-xl font-bold text-gray-800">📊 报表中心</h2><p className="text-sm text-gray-500 mt-1">数据全部来自业务表实时聚合，按周/月/年查看公司运营状况</p></div><div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-sm border border-gray-100">{(['weekly','monthly','yearly'] as TimePeriod[]).map(p=>(<button key={p} onClick={()=>setPeriod(p)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${period===p?'bg-blue-500 text-white shadow-sm':'text-gray-500 hover:bg-gray-50'}`}>{PERIOD_LABELS[p]}</button>))}</div></div>
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4"><div><h2 className="text-xl font-bold text-gray-800">📊 报表中心</h2><p className="text-sm text-gray-500 mt-1">数据全部来自业务表实时聚合，按周/月/年查看公司运营状况</p></div><div className="flex items-center gap-2 bg-white rounded-xl p-1 shadow-sm border border-gray-100">{(['weekly','monthly','yearly'] as TimePeriod[]).map(p=>(<button key={p} onClick={()=>setPeriod(p)} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${period===p?'bg-blue-500 text-white shadow-sm':'text-gray-500 hover:bg-gray-50'}`}>{PERIOD_LABELS[p]}</button>))}<button onClick={()=>window.print()} title="打印本页经营分析报表" className="no-print px-3 py-2 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">🖨️</button></div></div>
     <div className="flex gap-2 overflow-x-auto pb-2">{Object.entries(tabMeta).map(([key, report])=>(<button key={key} onClick={()=>setActiveTab(key)} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap transition-all ${activeTab===key?'bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-lg':'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'}`}><span>{report.icon}</span>{report.title}</button>))}</div>
     <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100"><div className="flex items-center justify-between mb-6"><h3 className="font-semibold text-gray-800 text-lg">{current.icon} {current.title} - {PERIOD_LABELS[period]}趋势</h3></div><ResponsiveContainer width="100%" height={360}><ComposedChart data={chartData}><defs><linearGradient id={`grad-${activeTab}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={current.color} stopOpacity={0.2}/><stop offset="95%" stopColor={current.color} stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0"/><XAxis dataKey="name" tick={{fontSize:11}} stroke="#9ca3af"/><YAxis tick={{fontSize:11}} stroke="#9ca3af" tickFormatter={fmt}/><Tooltip formatter={(v:any)=>[`¥${fmt(Number(v))}`,current.title]}/><Area type="monotone" dataKey="value" fill={`url(#grad-${activeTab})`} stroke={current.color} strokeWidth={2}/><Bar dataKey="value" fill={current.color} opacity={0.3} radius={[4,4,0,0]}/></ComposedChart></ResponsiveContainer>{chartData.length===0&&<p className="text-center text-sm text-gray-400 mt-2">暂无{current.title}数据</p>}</div>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

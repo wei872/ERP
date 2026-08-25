@@ -83,6 +83,8 @@ export const bizApi = {
   restoreBackup: (id: number) => request<any>(`/biz/restore/${id}`, { method: 'POST' }),
   companies: () => request<any[]>('/biz/companies'),
   budgetUsage: (department: string) => request<any>(`/biz/budget-usage?department=${encodeURIComponent(department)}`),
+  quoteApprove: (quoteNo: string) => request(`/biz/quote-approve/${encodeURIComponent(quoteNo)}`, { method: 'POST' }),
+  quoteToSale: (quoteNo: string) => request<any>(`/biz/quote-to-sale/${encodeURIComponent(quoteNo)}`, { method: 'POST' }),
   importExcel: async (type: string, file: File) => {
     const token = localStorage.getItem('erp_token');
     const fd = new FormData();

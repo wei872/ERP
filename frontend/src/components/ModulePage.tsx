@@ -193,6 +193,20 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
     catch (e: any) { toastFn('联动查询失败：' + (e.message || '')); }
   }, [toastFn]);
 
+  // 报价单：审批 / 转销售订单
+  const doQuoteApprove = useCallback(async (no: string) => {
+    try { await bizApi.quoteApprove(no); toastNotify(`报价单 ${no} 已审批`); fetchData(currentPage, search, sortCol, sortDir); }
+    catch (e: any) { toastNotify('审批失败：' + (e.message || '')); }
+  }, [fetchData, currentPage, search, sortCol, sortDir]);
+  const doQuoteToSale = useCallback(async (no: string) => {
+    if (!confirm(`将报价单 ${no} 转换为销售订单？（自动生成凭证与应收单）`)) return;
+    try {
+      const r = await bizApi.quoteToSale(no);
+      toastNotify(`已转换：${r.data.sales_no} · ¥${Number(r.data.amount).toLocaleString()}${r.data.warning || ''}`);
+      fetchData(currentPage, search, sortCol, sortDir);
+    } catch (e: any) { toastNotify('转换失败：' + (e.message || '')); }
+  }, [fetchData, currentPage, search, sortCol, sortDir]);
+
   const handleFileUpload = useCallback((k: string, file: File | null) => {
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
@@ -417,6 +431,8 @@ export default function ModulePage({ tableKey }: { tableKey: string }) {
                   {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => openDocLinks(String((row as any)[tableKey === 'trade_sales_main' ? 'sales_no' : 'purchase_no']))} className="px-2.5 py-1 text-[11px] text-teal-700 bg-teal-50 hover:bg-teal-100 rounded-md transition-colors font-medium">🔗 业财</button>}
                   {DRILL_CFG[tableKey] && <button onClick={() => setDrillKey(String((row as any)[DRILL_CFG[tableKey].key] ?? ''))} className="px-2.5 py-1 text-[11px] text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-md transition-colors font-medium">📄 明细</button>}
                   {(tableKey === 'trade_sales_main' || tableKey === 'trade_purchase_main') && <button onClick={() => setPrintRow(row as any)} className="px-2.5 py-1 text-[11px] text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors font-medium">🖨️ 打印</button>}
+                  {tableKey === 'prod_quotation' && ['已报价', '待审核'].includes(String((row as any).audit_status)) && <button onClick={() => doQuoteApprove(String((row as any).quote_no))} className="px-2.5 py-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors font-medium">✓ 审批</button>}
+                  {tableKey === 'prod_quotation' && String((row as any).audit_status) === '已通过' && <button onClick={() => doQuoteToSale(String((row as any).quote_no))} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">🔁 转订单</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleApprovalLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-md transition-colors font-medium">🔁 提审批</button>}
                   {tableKey === 'trade_purchase_main' && <button onClick={() => handleStockInLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-md transition-colors font-medium">📦 入库</button>}
                   {tableKey === 'trade_sales_main' && <button onClick={() => handleStockOutLink(row)} disabled={loading} className="px-2.5 py-1 text-[11px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors font-medium">🚚 出库</button>}
