@@ -73,6 +73,10 @@ export const bizApi = {
   voucherPost: (no: string) => request(`/biz/voucher-post/${encodeURIComponent(no)}`, { method: 'POST' }),
   dailyReport: () => request<any>('/biz/daily-report'),
   targetProgress: () => request<any>('/biz/target-progress'),
+  stockCheckQuery: (code: string, warehouse: string) => request<any>(`/biz/stock-check/query?product_code=${encodeURIComponent(code)}&warehouse=${encodeURIComponent(warehouse)}`),
+  stockCheckConfirm: (body: { product_code: string; warehouse: string; actual_qty: number; product_name?: string; reason?: string }) => request<any>('/biz/stock-check/confirm', { method: 'POST', body: JSON.stringify(body) }),
+  restoreBackup: (id: number) => request<any>(`/biz/restore/${id}`, { method: 'POST' }),
+  companies: () => request<any[]>('/biz/companies'),
   importExcel: async (type: string, file: File) => {
     const token = localStorage.getItem('erp_token');
     const fd = new FormData();

@@ -2,6 +2,7 @@ import { toastNotify } from '../utils/toast';
 import { useState } from 'react';
 import { bizApi } from '../api';
 import { downloadCsv } from '../utils/csv';
+import { getCurrentCompanyName } from '../utils/company';
 
 const PRESETS = ['资产', '负债', '权益', '利润', '现金流'] as const;
 type Stmt = 'balance' | 'income' | 'cashflow';
@@ -111,7 +112,7 @@ export default function FinancialStatementsPage() {
       </div>
       {/* 打印专用抬头（屏幕上隐藏） */}
       <div className="hidden print:block text-center mb-2">
-        <h1 className="text-lg font-bold text-slate-800">ERP 企业管理系统 · {NAMES[stmt]}</h1>
+        <h1 className="text-lg font-bold text-slate-800">{getCurrentCompanyName()} · {NAMES[stmt]}</h1>
         <p className="text-xs text-slate-500 mt-1">会计期间：{period} · 打印时间：{new Date().toLocaleString('zh-CN')}</p>
       </div>
 

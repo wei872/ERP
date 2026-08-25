@@ -198,6 +198,27 @@ public class DataController {
         try {
             String t=safe(table);
             if(body.isEmpty())return Result.error("数据为空");
+            // 客户信用额度控制：新增销售单前置校验（信用额度>0 时生效）
+            if (t.equals("trade_sales_main")) {
+                String custCode = str(body.get("customer_code"));
+                java.math.BigDecimal orderAmt = BigDecimal.ZERO;
+                try { if (body.get("total_amount") != null) orderAmt = new java.math.BigDecimal(String.valueOf(body.get("total_amount")).trim()); } catch (Exception ignored) {}
+                if (!custCode.isEmpty() && orderAmt.signum() > 0) {
+                    List<Map<String,Object>> cs = db.queryForList("SELECT customer_name, credit_limit FROM cust_customer_main WHERE customer_code=?", custCode);
+                    if (!cs.isEmpty() && cs.get(0).get("credit_limit") != null) {
+                        java.math.BigDecimal limit = new java.math.BigDecimal(cs.get(0).get("credit_limit").toString());
+                        if (limit.signum() > 0) {
+                            java.math.BigDecimal used = db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main WHERE customer_code=?", java.math.BigDecimal.class, custCode);
+                            if (used == null) used = java.math.BigDecimal.ZERO;
+                            if (used.add(orderAmt).compareTo(limit) > 0) {
+                                return Result.error("超出客户信用额度：" + cs.get(0).get("customer_name")
+                                    + "（额度 ¥" + limit + "，应收未收 ¥" + used + "，本单 ¥" + orderAmt
+                                    + "，将超出 ¥" + used.add(orderAmt).subtract(limit) + "）—— 请先催收核销回款或调整信用额度");
+                            }
+                        }
+                    }
+                }
+            }
             meta.validateDictValues(t, body);
             Map<String,Object> clean = sanitize(t, body);
             if(clean.isEmpty())return Result.error("无可插入字段（提交字段均不是表的真实列）");
@@ -428,9 +449,19 @@ public class DataController {
     @DeleteMapping("/{table}/{id}")
     public Result delete(@PathVariable String table, @PathVariable Long id, HttpServletRequest req) {
         if(!canWrite(String.valueOf(req.getAttribute("role")), table)) return Result.error("权限不足");
-        try{String t=safe(table);int n=db.update("DELETE FROM "+t+" WHERE id=?",id);
-            audit.log(String.valueOf(req.getAttribute("user")),table,"删除","id="+id,audit.getIp(req));
-            return n>0?Result.ok("删除成功"):Result.error("记录不存在");
+        try{String t=safe(table);
+            // 删除前归档到回收站（可一键恢复）
+            try {
+                List<Map<String,Object>> old = db.queryForList("SELECT * FROM "+t+" WHERE id=?", id);
+                if (!old.isEmpty()) {
+                    com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                    db.update("INSERT INTO sys_deleted_backup(table_name,row_id,row_data,deleted_by) VALUES(?,?,?,?)",
+                        t, id, om.writeValueAsString(old.get(0)), String.valueOf(req.getAttribute("user")));
+                }
+            } catch (Exception ignored) {} // 归档失败不阻断删除（如未执行 upgrade3 无回收站表）
+            int n=db.update("DELETE FROM "+t+" WHERE id=?",id);
+            audit.log(String.valueOf(req.getAttribute("user")),table,"删除","id="+id+"（已归档回收站）",audit.getIp(req));
+            return n>0?Result.ok("删除成功，已存入回收站可恢复"):Result.error("记录不存在");
         }catch(Exception e){
             String msg = e.getMessage() == null ? e.toString() : e.getMessage();
             if (msg.contains("a foreign key constraint fails")) return Result.error("删除失败：存在关联明细/引用记录（外键保护），请先处理子数据");

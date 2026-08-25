@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { dataApi } from '../api';
 import { toChineseAmount } from '../utils/amount';
+import { getCurrentCompanyName } from '../utils/company';
 
 const money = (v: unknown) => {
   const n = Number(v);
@@ -45,6 +46,7 @@ export default function DocPrintModal({ kind, mainRow, onClose }: Props) {
         <div className="p-8 overflow-y-auto flex-1 print-area">
           {/* 单据正文（打印区域） */}
           <div className="text-center mb-6">
+            <p className="text-sm font-semibold text-slate-700 tracking-widest mb-1">{getCurrentCompanyName()}</p>
             <h1 className="text-xl font-bold tracking-[0.3em] text-slate-800">{isSales ? '销 售 送 货 单' : '采 购 订 单'}</h1>
             <p className="text-[11px] text-slate-400 mt-1">ERP 企业管理系统 · 业财一体化单据</p>
           </div>

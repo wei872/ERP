@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useMeta, getModuleTree } from '../meta/store';
 import { ROLE_LABELS, ROLE_COLORS } from '../types';
 import { bizApi } from '../api';
+import { getCurrentCompany, setCurrentCompany, type CompanyInfo } from '../utils/company';
 import Login from './Login';
 import ModulePage from './ModulePage';
 // 业务页面全部懒加载：recharts 等大依赖不进首屏包，显著加快登录后首帧
@@ -23,6 +24,7 @@ const ProfitPage = lazy(() => import('./ProfitPage'));
 const BigScreen = lazy(() => import('./BigScreen'));
 const DailyReportPage = lazy(() => import('./DailyReportPage'));
 const DictManagePage = lazy(() => import('./DictManagePage'));
+const RecycleBinPage = lazy(() => import('./RecycleBinPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -32,7 +34,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -86,6 +88,7 @@ export default function Layout() {
     { label: '审计日志', icon: '🕵️', page: { type: 'audit' } },
     { label: '毛利分析', icon: '💹', page: { type: 'profit' } },
     { label: '数据字典', icon: '📖', page: { type: 'dicts' } },
+    { label: '操作回收站', icon: '🗑️', page: { type: 'recycle' } },
   ];
   const gResults = useMemo(() => {
     const q = gq.trim().toLowerCase();
@@ -124,6 +127,29 @@ export default function Layout() {
   const n = (v: unknown) => Number(v) || 0;
   const todoTotal = todos ? n(todos.pendingApprovals) + n(todos.lowStock?.count) + n(todos.overdueReceivable?.count) + n(todos.overduePayable?.count) + n(todos.pendingUsers) : 0;
   const todoJump = (p: Page) => { go(p); setTodoOpen(false); };
+
+  // ── 多公司（账套）上下文切换 ──
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [curCompany, setCurCompany] = useState<CompanyInfo>(getCurrentCompany());
+  useEffect(() => {
+    bizApi.companies().then(r => {
+      const list = r.data || [];
+      setCompanies(list);
+      // 本地记忆的公司若已不存在则回退默认
+      const cur = getCurrentCompany();
+      if (list.length > 0 && !list.some((c: any) => c.company_code === cur.company_code)) {
+        const def = list.find((c: any) => c.is_default) || list[0];
+        setCurrentCompany({ company_code: def.company_code, company_name: def.company_name, short_name: def.short_name });
+        setCurCompany({ company_code: def.company_code, company_name: def.company_name, short_name: def.short_name });
+      }
+    }).catch(() => {});
+  }, []);
+  const switchCompany = (code: string) => {
+    const c = companies.find((x: any) => x.company_code === code);
+    if (!c) return;
+    setCurrentCompany({ company_code: c.company_code, company_name: c.company_name, short_name: c.short_name });
+    setCurCompany({ company_code: c.company_code, company_name: c.company_name, short_name: c.short_name });
+  };
 
   // ── 常用表收藏（表格页星标切换，跨事件同步） ──
   const [bigScreen, setBigScreen] = useState(false);
@@ -175,6 +201,7 @@ export default function Layout() {
     if (page.type === 'profit') return '💹 销售毛利分析';
     if (page.type === 'daily') return '📰 经营日报';
     if (page.type === 'dicts') return '📖 数据字典维护';
+    if (page.type === 'recycle') return '🗑️ 操作回收站';
     if (page.type === 'table') { const t = tables.find(x => x.table === page.tableKey); return t ? `${t.module} > ${t.sub} > ${t.cnName}` : '数据表'; }
     return '';
   };
@@ -197,6 +224,7 @@ export default function Layout() {
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'users' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'users' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">👤</span>{expanded && <span className="flex items-center gap-2">用户管理{pendingCount > 0 && <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full leading-none">{pendingCount}</span>}</span>}</button>)}
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'rbac' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'rbac' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🛡️</span>{expanded && <span>RBAC 权限矩阵</span>}</button>)}
         {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'dicts' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'dicts' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">📖</span>{expanded && <span>数据字典维护</span>}</button>)}
+        {currentUser.role === 'admin' && (<button onClick={() => go({ type: 'recycle' })} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all mb-0.5 ${page.type === 'recycle' ? 'bg-indigo-500/15 text-indigo-300' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}><span className="shrink-0 text-base">🗑️</span>{expanded && <span>操作回收站</span>}</button>)}
         {expanded && favTables.length > 0 && (<div className="mb-1">
           <div className="mt-4 mb-1.5 px-3 text-[10px] text-slate-500 uppercase tracking-widest font-semibold">⭐ 常用收藏</div>
           {favTables.map(tk => { const t = tables.find(x => x.table === tk); if (!t) return null; return (
@@ -256,6 +284,13 @@ export default function Layout() {
           )}
         </div>
         <div className="flex items-center gap-1.5 sm:gap-3">
+          {/* 公司（账套）切换 */}
+          {companies.length > 1 && (
+            <select value={curCompany.company_code} onChange={e => switchCompany(e.target.value)} title="切换公司账套"
+              className="hidden sm:block max-w-[150px] text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-600 outline-none focus:border-indigo-400 cursor-pointer">
+              {companies.map((c: any) => <option key={c.company_code} value={c.company_code}>🏢 {c.short_name || c.company_name}</option>)}
+            </select>
+          )}
           {/* 数据大屏 */}
           <button onClick={() => setBigScreen(true)} title="经营驾驶舱（数据大屏）" className="no-print p-2 rounded-lg text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M3 4h18v12H3zM8 20h8m-4-4v4"/></svg>
@@ -356,6 +391,7 @@ export default function Layout() {
         {page.type === 'profit' && <ProfitPage />}
         {page.type === 'daily' && <DailyReportPage />}
         {page.type === 'dicts' && <DictManagePage />}
+        {page.type === 'recycle' && <RecycleBinPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
         {page.type === 'table' && page.tableKey !== 'fin_template' && <ModulePage tableKey={page.tableKey} />}
         </Suspense>

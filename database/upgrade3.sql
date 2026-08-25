@@ -149,6 +149,55 @@ INSERT IGNORE INTO sys_dict_item(dict_code, item_value, item_label, color, sort_
 INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
 ('cust_contract_main','status','doc.status');
 
+-- ── 库存盘点单：补充商品维度列（原表为仓级汇总结构） ──
+SET @c8 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='trade_stock_check' AND column_name='product_code');
+SET @s8 = IF(@c8=0, 'ALTER TABLE trade_stock_check ADD COLUMN product_code VARCHAR(50) COMMENT ''盘点商品编码''', 'SELECT 1'); PREPARE st8 FROM @s8; EXECUTE st8; DEALLOCATE PREPARE st8;
+SET @c9 = (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='trade_stock_check' AND column_name='product_name');
+SET @s9 = IF(@c9=0, 'ALTER TABLE trade_stock_check ADD COLUMN product_name VARCHAR(100) COMMENT ''盘点商品名称''', 'SELECT 1'); PREPARE st9 FROM @s9; EXECUTE st9; DEALLOCATE PREPARE st9;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('trade_stock_check','库存盘点单','进销存管理','盘点管理',906);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('trade_stock_check','status','doc.status');
+
+-- ── 操作回收站：删除前自动归档，可一键恢复 ──
+CREATE TABLE IF NOT EXISTS sys_deleted_backup (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  table_name VARCHAR(64) COMMENT '原表名',
+  row_id BIGINT COMMENT '原记录ID',
+  row_data LONGTEXT COMMENT '完整行数据JSON',
+  deleted_by VARCHAR(50),
+  deleted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('sys_deleted_backup','操作回收站','系统维护','数据安全',912);
+
+-- ── 多公司/多账套：公司主数据（全局公司上下文的基础） ──
+CREATE TABLE IF NOT EXISTS sys_company (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  company_code VARCHAR(50) COMMENT '公司编码',
+  company_name VARCHAR(100) COMMENT '公司全称',
+  short_name VARCHAR(50) COMMENT '简称',
+  tax_no VARCHAR(50) COMMENT '税号',
+  address VARCHAR(200),
+  status VARCHAR(20) DEFAULT '启用',
+  is_default INT DEFAULT 0 COMMENT '默认公司 1=是',
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_company_code (company_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('sys_company','公司档案','系统维护','组织架构',911);
+
+INSERT IGNORE INTO sys_dict_column(table_name, column_name, dict_code) VALUES
+('sys_company','status','common.enable');
+
+INSERT IGNORE INTO sys_company(company_code, company_name, short_name, tax_no, address, status, is_default) VALUES
+('HQ', '三包智联科技有限公司', '三包智联', '91310000MA1FL8XQ0A', '上海市松江区茸江路88号', '启用', 1),
+('SZ-01', '深圳智造分公司', '深圳智造', '91440300MA5FQK7B2C', '深圳市南山区科技园南区12栋', '启用', 0);
+
 -- 批次/编码规则表注册进通用菜单与字典
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('trade_batch_trace','批次追溯台账','进销存管理','批次追溯',901),

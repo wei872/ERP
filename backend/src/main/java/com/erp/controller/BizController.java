@@ -531,11 +531,96 @@ public class BizController {
                 alerts.put("expiredContracts", db.queryForObject("SELECT COUNT(*) FROM cust_contract_main WHERE status='执行中' AND end_date<CURDATE()", Long.class));
                 ret.put("expiringContractList", db.queryForList("SELECT contract_no, contract_name, party_name, amount, end_date FROM cust_contract_main WHERE status='执行中' AND end_date<=DATE_ADD(CURDATE(), INTERVAL 30 DAY) ORDER BY end_date LIMIT 5"));
             } catch (Exception ignored) {} // 未执行 upgrade3 时无合同表
+            try {
+                alerts.put("highCreditUsage", db.queryForObject(
+                    "SELECT COUNT(*) FROM (SELECT c.customer_code FROM cust_customer_main c " +
+                    "JOIN (SELECT customer_code, SUM(remain_amount) u FROM finance_receivable_main GROUP BY customer_code) r " +
+                    "ON r.customer_code=c.customer_code WHERE c.credit_limit>0 AND r.u >= c.credit_limit*0.9) x", Long.class));
+            } catch (Exception ignored) {}
             ret.put("alerts", alerts);
             ret.put("recentSales", db.queryForList("SELECT sales_no, customer_name, total_amount, sales_status FROM trade_sales_main ORDER BY id DESC LIMIT 5"));
             ret.put("recentApprovals", db.queryForList("SELECT approval_no, approval_type, applicant, amount, approval_status FROM oa_approval_main ORDER BY id DESC LIMIT 5"));
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("日报加载失败: " + e.getMessage()); }
+    }
+
+    // ── 库存盘点：查账面 → 录实盘 → 自动调账 ──
+    @GetMapping("/stock-check/query") public Result stockCheckQuery(@RequestParam String product_code, @RequestParam String warehouse) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT qty, unit_cost, product_name FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", product_code, warehouse);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            if (rows.isEmpty()) { ret.put("exists", false); ret.put("system_qty", 0); }
+            else { ret.put("exists", true); ret.put("system_qty", rows.get(0).get("qty")); ret.put("unit_cost", rows.get(0).get("unit_cost")); ret.put("product_name", rows.get(0).get("product_name")); }
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("查询失败: " + e.getMessage()); }
+    }
+    @PostMapping("/stock-check/confirm") public Result stockCheckConfirm(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"warehouse".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String code = String.valueOf(body.get("product_code"));
+            String wh = String.valueOf(body.getOrDefault("warehouse", "默认仓"));
+            java.math.BigDecimal actual = new java.math.BigDecimal(String.valueOf(body.getOrDefault("actual_qty", "0")));
+            if (code.isEmpty() || actual.signum() < 0) return Result.error("商品编码/实盘数量无效");
+            List<Map<String,Object>> rows = db.queryForList("SELECT qty, unit_cost, product_name FROM trade_inventory_balance WHERE product_code=? AND warehouse=?", code, wh);
+            java.math.BigDecimal system = rows.isEmpty() ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(rows.get(0).get("qty").toString());
+            java.math.BigDecimal unitCost = (rows.isEmpty() || rows.get(0).get("unit_cost") == null) ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(rows.get(0).get("unit_cost").toString());
+            String pName = rows.isEmpty() ? String.valueOf(body.getOrDefault("product_name", code)) : String.valueOf(rows.get(0).get("product_name"));
+            java.math.BigDecimal diff = actual.subtract(system);
+            String checkNo = "PD-" + System.currentTimeMillis();
+            // 差异自动调账（盘点盈亏单）
+            if (diff.signum() > 0) inventory.stockIn(code, pName, "", wh, "", diff, unitCost, checkNo);
+            else if (diff.signum() < 0) inventory.stockOut(code, wh, diff.abs(), checkNo);
+            try {
+                db.update("INSERT INTO trade_stock_check(check_no,warehouse,product_code,product_name,check_date,system_qty,actual_qty,diff_qty,diff_amount,checker,status,remark) VALUES(?,?,?,?,CURDATE(),?,?,?,?,?,'已盘点',?)",
+                    checkNo, wh, code, pName, system, actual, diff, diff.multiply(unitCost), user(req), String.valueOf(body.getOrDefault("reason", "")));
+            } catch (Exception ignored) {} // 未执行 upgrade3 补列时不阻断调账
+            audit.log(user(req), "库存", "盘点", checkNo + " " + code + " 差异=" + diff, audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("check_no", checkNo);
+            ret.put("diff", diff);
+            ret.put("diff_amount", diff.multiply(unitCost));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("盘点确认失败: " + e.getMessage()); }
+    }
+
+    // ── 回收站恢复 ──
+    @PostMapping("/restore/{backupId}")
+    @SuppressWarnings("unchecked")
+    public Result restoreBackup(@PathVariable Long backupId, HttpServletRequest req) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT * FROM sys_deleted_backup WHERE id=?", backupId);
+            if (rows.isEmpty()) return Result.error("回收站记录不存在");
+            String table = String.valueOf(rows.get(0).get("table_name"));
+            if (!table.matches("^[a-z][a-z0-9_]{2,60}$")) return Result.error("无效表名");
+            Map<String,Object> data = new com.fasterxml.jackson.databind.ObjectMapper().readValue(String.valueOf(rows.get(0).get("row_data")), Map.class);
+            data.remove("id"); // 恢复时使用新 ID，避免主键冲突
+            if (data.isEmpty()) return Result.error("备份数据为空");
+            StringBuilder sb = new StringBuilder("INSERT INTO " + table + " ("), vb = new StringBuilder(" VALUES (");
+            List<Object> params = new ArrayList<>();
+            boolean first = true;
+            for (Map.Entry<String,Object> e : data.entrySet()) {
+                String k = e.getKey();
+                if (!k.matches("^[a-zA-Z_][a-zA-Z0-9_]{0,60}$")) continue;
+                if (!first) { sb.append(","); vb.append(","); }
+                sb.append("`").append(k).append("`");
+                vb.append("?");
+                params.add(e.getValue());
+                first = false;
+            }
+            sb.append(")").append(vb.append(")"));
+            db.update(sb.toString(), params.toArray());
+            db.update("DELETE FROM sys_deleted_backup WHERE id=?", backupId);
+            audit.log(user(req), "系统", "回收站恢复", table + "#" + rows.get(0).get("row_id"), audit.getIp(req));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("table", table);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("恢复失败: " + e.getMessage()); }
+    }
+
+    // ── 多公司主数据 ──
+    @GetMapping("/companies") public Result companies() {
+        try { return Result.ok(db.queryForList("SELECT * FROM sys_company WHERE status='启用' ORDER BY is_default DESC, id")); }
+        catch (Exception e) { return Result.ok(java.util.Collections.emptyList()); }
     }
 
     // ── 销售目标达成率 ──

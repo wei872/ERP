@@ -151,6 +151,10 @@ export default function DailyReportPage() {
               <span className="text-xs text-slate-600">🔁 待处理审批</span>
               <span className={`text-sm font-bold tabular-nums ${Number(a.pendingApprovals) > 0 ? 'text-violet-600' : 'text-slate-400'}`}>{Number(a.pendingApprovals || 0)} 条</span>
             </div>
+            <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${Number(a.highCreditUsage) > 0 ? 'bg-orange-50/60 border-orange-200' : 'bg-slate-50 border-slate-100'}`}>
+              <span className="text-xs text-slate-600">💳 客户信用占用 ≥90%</span>
+              <span className={`text-sm font-bold tabular-nums ${Number(a.highCreditUsage) > 0 ? 'text-orange-500' : 'text-slate-400'}`}>{Number(a.highCreditUsage || 0)} 家</span>
+            </div>
             <div className={`flex items-center justify-between px-3 py-2.5 rounded-xl border ${Number(a.expiredContracts) > 0 ? 'bg-red-50/60 border-red-200' : 'bg-slate-50 border-slate-100'}`}>
               <span className="text-xs text-slate-600">📄 合同已过期未完结</span>
               <span className={`text-sm font-bold tabular-nums ${Number(a.expiredContracts) > 0 ? 'text-red-500' : 'text-slate-400'}`}>{Number(a.expiredContracts || 0)} 份</span>

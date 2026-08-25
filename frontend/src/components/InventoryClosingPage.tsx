@@ -9,7 +9,7 @@ export default function InventoryClosingPage() {
   const { currentUser } = useAuth();
   const isAdmin = currentUser?.role === 'admin';
   const [showGuide, setShowGuide] = useState(false);
-  const [tab, setTab] = useState<'stock' | 'close' | 'trace'>('stock');
+  const [tab, setTab] = useState<'stock' | 'close' | 'trace' | 'count'>('stock');
   const [saving, setSaving] = useState(false);
 
   // 批次追溯
@@ -61,6 +61,39 @@ export default function InventoryClosingPage() {
   const [tfTo, setTfTo] = useState('');
   const [tfQty, setTfQty] = useState(0);
   const [tfReason, setTfReason] = useState('');
+  // 库存盘点
+  const [ckCode, setCkCode] = useState('');
+  const [ckWh, setCkWh] = useState('默认仓');
+  const [ckBook, setCkBook] = useState<any>(null);
+  const [ckActual, setCkActual] = useState<number | ''>('');
+  const [ckReason, setCkReason] = useState('');
+  const [ckRecords, setCkRecords] = useState<any[]>([]);
+
+  const queryBook = async () => {
+    if (!ckCode.trim()) { toastNotify('请输入商品编码', 'warn'); return; }
+    try {
+      const r = await bizApi.stockCheckQuery(ckCode.trim(), ckWh);
+      setCkBook(r.data);
+      setCkActual(r.data?.exists ? Number(r.data.system_qty) : '');
+    } catch (e: any) { toastNotify('查询失败：' + (e.message || '')); }
+  };
+  const confirmCount = async () => {
+    if (!ckCode.trim() || ckActual === '') { toastNotify('请先查询账面库存并填写实盘数量', 'warn'); return; }
+    setSaving(true);
+    try {
+      const r = await bizApi.stockCheckConfirm({ product_code: ckCode.trim(), warehouse: ckWh, actual_qty: Number(ckActual), product_name: ckBook?.product_name || '', reason: ckReason });
+      const diff = Number(r.data.diff) || 0;
+      toastNotify(`盘点完成 ${r.data.check_no}：差异 ${diff > 0 ? '+' : ''}${diff}（${diff > 0 ? '盘盈入库' : diff < 0 ? '盘亏出库' : '账实一致'}），已自动调账`);
+      setCkCode(''); setCkBook(null); setCkActual(''); setCkReason('');
+      loadCountRecords();
+      loadPanoramicData();
+    } catch (e: any) { toastNotify('盘点确认失败：' + (e.message || '')); }
+    setSaving(false);
+  };
+  const loadCountRecords = useCallback(() => {
+    dataApi.list('trade_stock_check', 1, 20, '').then(r => setCkRecords(r.data?.rows || [])).catch(() => {});
+  }, []);
+  useEffect(() => { if (tab === 'count') loadCountRecords(); }, [tab, loadCountRecords]);
 
   useEffect(() => {
     // 仓库列表：优先仓库主数据表，兜底默认仓（未执行 upgrade3 的环境）
@@ -212,6 +245,7 @@ export default function InventoryClosingPage() {
           </button>
           <button onClick={()=>setTab('stock')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='stock'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>进销存直调与看板</button>
           <button onClick={()=>setTab('trace')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='trace'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>🧬 批次追溯</button>
+          <button onClick={()=>setTab('count')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='count'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>📋 库存盘点</button>
           <button onClick={()=>setTab('close')} className={`px-4 py-2 rounded-lg text-sm font-medium ${tab==='close'?'bg-indigo-600 text-white shadow-md':'bg-white border'}`}>期末月结/年结</button>
         </div>
       </div>
@@ -500,6 +534,81 @@ export default function InventoryClosingPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'count' && (
+        <div className="space-y-6">
+          {/* 盘点表单：查账面 → 录实盘 → 自动调账 */}
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200/80 max-w-2xl">
+            <h3 className="font-bold text-slate-800 text-base mb-1 flex items-center gap-2"><span>📋</span><span>库存盘点（账实核对，差异自动调账）</span></h3>
+            <p className="text-[11px] text-slate-400 mb-4">第一步查询账面库存 → 第二步录入实盘数量 → 确认后盘盈自动入库 / 盘亏自动出库，生成盘点单</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="text-xs font-medium text-slate-500">商品编码 *</label><input value={ckCode} onChange={e=>setCkCode(e.target.value)} placeholder="例如: IC-0001 / FG-001" className="input"/></div>
+              <div><label className="text-xs font-medium text-slate-500">盘点仓库 *</label>
+                <select value={ckWh} onChange={e=>setCkWh(e.target.value)} className="input">{warehouses.map(w => <option key={w} value={w}>{w}</option>)}</select>
+              </div>
+              <div className="col-span-2 flex justify-end">
+                <button onClick={queryBook} className="px-5 py-2 bg-slate-800 text-white rounded-xl text-sm font-medium hover:bg-slate-700 transition-colors">🔍 查询账面库存</button>
+              </div>
+            </div>
+            {ckBook && (
+              <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-3 erp-fade-in">
+                {ckBook.exists ? (
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                    <span className="text-slate-600">{ckBook.product_name}</span>
+                    <span className="text-slate-500">账面库存 <b className="text-slate-800 tabular-nums">{Number(ckBook.system_qty)}</b></span>
+                    <span className="text-slate-500">单位成本 <b className="text-slate-800 tabular-nums">¥{Number(ckBook.unit_cost || 0).toFixed(2)}</b></span>
+                  </div>
+                ) : (
+                  <p className="text-sm text-amber-600">该仓库无此商品库存记录（实盘录入将作为盘盈入库）</p>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className="text-xs font-medium text-slate-500">实盘数量 *</label><input type="number" value={ckActual} onChange={e=>setCkActual(e.target.value === '' ? '' : Number(e.target.value))} className="input font-mono"/></div>
+                  <div><label className="text-xs font-medium text-slate-500">盘点说明</label><input value={ckReason} onChange={e=>setCkReason(e.target.value)} placeholder="选填，如：破损报废/漏记出库" className="input"/></div>
+                </div>
+                {ckActual !== '' && (
+                  <p className={`text-xs font-medium ${Number(ckActual) - Number(ckBook.system_qty || 0) > 0 ? 'text-emerald-600' : Number(ckActual) - Number(ckBook.system_qty || 0) < 0 ? 'text-red-500' : 'text-slate-400'}`}>
+                    差异：{(Number(ckActual) - Number(ckBook.system_qty || 0)) > 0 ? '+' : ''}{Number(ckActual) - Number(ckBook.system_qty || 0)}（
+                    {(Number(ckActual) - Number(ckBook.system_qty || 0)) > 0 ? '盘盈，确认后将自动入库' : (Number(ckActual) - Number(ckBook.system_qty || 0)) < 0 ? '盘亏，确认后将自动出库' : '账实一致'}）
+                  </p>
+                )}
+                <div className="flex justify-end">
+                  <button onClick={confirmCount} disabled={saving} className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl text-sm font-semibold shadow-md disabled:opacity-50">{saving ? '处理中...' : '确认盘点并调账'}</button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 最近盘点记录 */}
+          <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
+            <h4 className="font-bold text-slate-800 text-sm mb-3">🗂️ 最近盘点记录（`trade_stock_check`）</h4>
+            {ckRecords.length === 0 ? <p className="text-xs text-slate-400 text-center py-6">暂无盘点记录</p> : (
+              <div className="overflow-x-auto">
+                <table className="erp-table text-xs">
+                  <thead><tr><th>盘点单号</th><th>商品</th><th>仓库</th><th>账面</th><th>实盘</th><th>差异</th><th>差异金额</th><th>盘点人</th><th>日期</th></tr></thead>
+                  <tbody>
+                    {ckRecords.map(r => {
+                      const diff = Number(r.diff_qty || 0);
+                      return (
+                        <tr key={r.id}>
+                          <td className="font-mono whitespace-nowrap">{r.check_no}</td>
+                          <td className="whitespace-nowrap">{r.product_name || r.product_code}</td>
+                          <td className="whitespace-nowrap text-slate-500">{r.warehouse}</td>
+                          <td className="tabular-nums">{Number(r.system_qty || 0)}</td>
+                          <td className="tabular-nums">{Number(r.actual_qty || 0)}</td>
+                          <td className={`tabular-nums font-bold ${diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-red-500' : 'text-slate-400'}`}>{diff > 0 ? '+' : ''}{diff}</td>
+                          <td className="tabular-nums">¥{Number(r.diff_amount || 0).toLocaleString()}</td>
+                          <td className="whitespace-nowrap">{r.checker}</td>
+                          <td className="whitespace-nowrap text-slate-500">{String(r.check_date || '').slice(0, 10)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
