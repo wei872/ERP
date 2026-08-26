@@ -2478,6 +2478,13 @@ INSERT IGNORE INTO finance_receivable_main (receivable_no,customer_code,customer
 ('RCV-D-0058','C-002','南方物联科技公司',23370.00,0.00,23370.00,CURDATE(),0,'应收','销售单:SO-0059'),
 ('RCV-D-0059','C-008','中原农机股份公司',4140.00,0.00,4140.00,CURDATE(),0,'应收','销售单:SO-0060'),
 ('RCV-D-0060','C-002','南方物联科技公司',5120.00,0.00,5120.00,CURDATE(),0,'应收','销售单:SO-0061');
+INSERT IGNORE INTO finance_collection_record (receivable_no,customer_code,customer_name,method,contact_person,content,result,next_follow_date,collector,collect_date) VALUES
+('RCV-D-0009','C-006','长江智慧能源公司','电话','赵敏','电话沟通回款安排，对方确认对账无误','承诺付款',DATE_SUB(CURDATE(), INTERVAL 103 DAY),'张三',DATE_SUB(CURDATE(), INTERVAL 6 DAY)),
+('RCV-D-0009','C-006','长江智慧能源公司','催款函','赵敏','已发送正式催款函，要求 5 个工作日内付款','需再跟进',DATE_SUB(CURDATE(), INTERVAL 2 DAY),'张三',DATE_SUB(CURDATE(), INTERVAL 2 DAY)),
+('RCV-D-0013','C-001','华东智能制造有限公司','邮件','王建国','电话沟通回款安排，对方确认对账无误','需再跟进',DATE_SUB(CURDATE(), INTERVAL 80 DAY),'王小明',DATE_SUB(CURDATE(), INTERVAL 9 DAY)),
+('RCV-D-0013','C-001','华东智能制造有限公司','催款函','王建国','已发送正式催款函，要求 5 个工作日内付款','需再跟进',DATE_SUB(CURDATE(), INTERVAL 2 DAY),'王小明',DATE_SUB(CURDATE(), INTERVAL 3 DAY)),
+('RCV-D-0023','C-006','长江智慧能源公司','微信','赵敏','电话沟通回款安排，对方确认对账无误','无回应',DATE_SUB(CURDATE(), INTERVAL 69 DAY),'张三',DATE_SUB(CURDATE(), INTERVAL 12 DAY)),
+('RCV-D-0037','C-002','南方物联科技公司','催款函','李晓明','电话沟通回款安排，对方确认对账无误','承诺付款',DATE_SUB(CURDATE(), INTERVAL 39 DAY),'王小明',DATE_SUB(CURDATE(), INTERVAL 15 DAY));
 INSERT IGNORE INTO finance_payable_main (payable_no,supplier_code,supplier_name,total_amount,paid_amount,remain_amount,due_date,status,remark) VALUES
 ('PAY-D-0001','S-002','东莞精工五金制品厂',834.00,834.00,0.00,DATE_SUB(CURDATE(), INTERVAL 216 DAY),'已核销','采购单:PO-0001'),
 ('PAY-D-0002','S-006','杭州测控技术公司',3360.00,3360.00,0.00,DATE_SUB(CURDATE(), INTERVAL 228 DAY),'已核销','采购单:PO-0002'),

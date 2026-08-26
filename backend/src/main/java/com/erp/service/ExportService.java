@@ -1401,6 +1401,24 @@ public class ExportService {
             }
 
             List<Map<String,Object>> rows = db.queryForList("SELECT * FROM " + tableName + " LIMIT 10000");
+            // 敏感数据脱敏（v5.29）：导出通道强制脱敏手机号/邮箱，防止批量泄露
+            for (Map<String,Object> row : rows) {
+                for (Map.Entry<String,Object> e : row.entrySet()) {
+                    String k = e.getKey() == null ? "" : e.getKey().toLowerCase();
+                    Object v = e.getValue();
+                    if (v == null) continue;
+                    String s = String.valueOf(v);
+                    if (s.isEmpty()) continue;
+                    if (k.contains("phone") || k.contains("mobile")) {
+                        String digits = s.replaceAll("[^0-9]", "");
+                        if (digits.length() >= 7) e.setValue(digits.substring(0, 3) + "****" + digits.substring(digits.length() - 4));
+                        else if (digits.length() >= 4) e.setValue(digits.substring(0, 1) + "***" + digits.substring(digits.length() - 2));
+                    } else if (k.contains("email")) {
+                        int at = s.indexOf('@');
+                        if (at > 1) e.setValue(s.charAt(0) + "***" + s.substring(at));
+                    }
+                }
+            }
 
             StringBuilder csv = new StringBuilder();
             String tableCn = TABLE_CN_MAP.getOrDefault(tableName, tableName);

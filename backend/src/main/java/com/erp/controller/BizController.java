@@ -1524,6 +1524,187 @@ public class BizController {
         } catch (Exception e) { return Result.error("作废失败: " + e.getMessage()); }
     }
 
+    // ── 催收管理中心（v5.29）：逾期应收看板 + 催收记录台账 ──
+    @GetMapping("/collection/board") public Result collectionBoard() {
+        try {
+            List<Map<String,Object>> rows = db.queryForList(
+                "SELECT r.*, DATEDIFF(CURDATE(), r.due_date) overdue_days_calc, " +
+                "(SELECT COUNT(*) FROM finance_collection_record c WHERE c.receivable_no=r.receivable_no) follow_cnt " +
+                "FROM finance_receivable_main r WHERE r.remain_amount>0 AND r.due_date<CURDATE() ORDER BY r.due_date ASC LIMIT 300");
+            long b30 = 0, b60 = 0, b90 = 0, b90p = 0;
+            java.math.BigDecimal a30 = java.math.BigDecimal.ZERO, a60 = java.math.BigDecimal.ZERO, a90 = java.math.BigDecimal.ZERO, a90p = java.math.BigDecimal.ZERO, total = java.math.BigDecimal.ZERO;
+            for (Map<String,Object> r : rows) {
+                long d = ((Number) r.get("overdue_days_calc")).longValue();
+                java.math.BigDecimal amt = bd(r.get("remain_amount"));
+                total = total.add(amt);
+                if (d <= 30) { b30++; a30 = a30.add(amt); }
+                else if (d <= 60) { b60++; a60 = a60.add(amt); }
+                else if (d <= 90) { b90++; a90 = a90.add(amt); }
+                else { b90p++; a90p = a90p.add(amt); }
+            }
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("count", rows.size());
+            totals.put("amount", total);
+            totals.put("b30", map2("count", b30, "amount", a30));
+            totals.put("b60", map2("count", b60, "amount", a60));
+            totals.put("b90", map2("count", b90, "amount", a90));
+            totals.put("b90p", map2("count", b90p, "amount", a90p));
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", rows);
+            ret.put("totals", totals);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("催收看板加载失败: " + e.getMessage()); }
+    }
+
+    private Map<String,Object> map2(String k1, Object v1, String k2, Object v2) {
+        Map<String,Object> m = new LinkedHashMap<>();
+        m.put(k1, v1); m.put(k2, v2);
+        return m;
+    }
+
+    @PostMapping("/collection/add") public Result collectionAdd(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"sales".equals(role(req)) && !"accounting".equals(role(req))) return Result.error("权限不足");
+        try {
+            String rcvNo = String.valueOf(body.getOrDefault("receivable_no", "")).trim();
+            if (rcvNo.isEmpty()) return Result.error("应收单号必填");
+            List<Map<String,Object>> rcv = db.queryForList("SELECT customer_code, customer_name FROM finance_receivable_main WHERE receivable_no=?", rcvNo);
+            if (rcv.isEmpty()) return Result.error("应收单不存在: " + rcvNo);
+            String result = String.valueOf(body.getOrDefault("result", "需再跟进"));
+            if (!"承诺付款".equals(result) && !"需再跟进".equals(result) && !"无回应".equals(result) && !"已回款".equals(result))
+                return Result.error("催收结果无效");
+            String nextDate = String.valueOf(body.getOrDefault("next_follow_date", "")).trim();
+            db.update("INSERT INTO finance_collection_record(receivable_no,customer_code,customer_name,method,contact_person,content,result,next_follow_date,collector,collect_date) VALUES(?,?,?,?,?,?,?,?,?,CURDATE())",
+                rcvNo, rcv.get(0).get("customer_code"), rcv.get(0).get("customer_name"),
+                String.valueOf(body.getOrDefault("method", "电话")), String.valueOf(body.getOrDefault("contact_person", "")),
+                String.valueOf(body.getOrDefault("content", "")), result, nextDate.isEmpty() ? null : nextDate, user(req));
+            audit.log(user(req), "催收", "催收记录", rcvNo + " " + body.getOrDefault("method", "电话") + " " + result, audit.getIp(req));
+            return Result.ok("催收记录已登记");
+        } catch (Exception e) { return Result.error("催收登记失败: " + e.getMessage()); }
+    }
+
+    @GetMapping("/collection/records") public Result collectionRecords(@RequestParam String receivable_no) {
+        try {
+            return Result.ok(db.queryForList("SELECT * FROM finance_collection_record WHERE receivable_no=? ORDER BY id DESC LIMIT 50", receivable_no));
+        } catch (Exception e) { return Result.error("催收记录加载失败: " + e.getMessage()); }
+    }
+
+    // ── 工单成本分析（v5.29）：领料实际成本 + 人工/制费标准费率 → 工单损益 ──
+    @GetMapping("/workorder-cost") public Result workorderCost() {
+        try {
+            final java.math.BigDecimal LABOR_RATE = new java.math.BigDecimal("15");   // 人工费标准费率（元/件）
+            final java.math.BigDecimal OVERHEAD_RATE = new java.math.BigDecimal("8"); // 制造费用标准费率（元/件）
+            // 物料成本单价：库存加权均价，缺失回退商品采购价
+            Map<String, java.math.BigDecimal> costMap = new LinkedHashMap<>();
+            for (Map<String,Object> r : db.queryForList("SELECT product_code, AVG(unit_cost) c FROM trade_inventory_balance WHERE unit_cost>0 GROUP BY product_code"))
+                costMap.put(String.valueOf(r.get("product_code")), bd(r.get("c")));
+            Map<String, java.math.BigDecimal> priceMap = new LinkedHashMap<>();
+            for (Map<String,Object> r : db.queryForList("SELECT product_code, purchase_price, sale_price FROM trade_goods_main")) {
+                String c = String.valueOf(r.get("product_code"));
+                if (!costMap.containsKey(c)) costMap.put(c, bd(r.get("purchase_price")));
+                priceMap.put(c, bd(r.get("sale_price")));
+            }
+            List<Map<String,Object>> wos = db.queryForList("SELECT work_order_no, product_code, product_name, plan_qty, actual_qty, order_status FROM prod_work_order ORDER BY id DESC LIMIT 60");
+            // 领料聚合：按计划领料与实际领料分别计算金额
+            Map<String, java.math.BigDecimal[]> reqMap = new LinkedHashMap<>(); // [planCost, actualCost]
+            for (Map<String,Object> r : db.queryForList("SELECT ref_work_order, product_code, COALESCE(SUM(plan_req_qty),0) pq, COALESCE(SUM(actual_req_qty),0) aq FROM prod_material_requisition GROUP BY ref_work_order, product_code")) {
+                java.math.BigDecimal unit = costMap.getOrDefault(String.valueOf(r.get("product_code")), java.math.BigDecimal.ZERO);
+                java.math.BigDecimal[] v = reqMap.computeIfAbsent(String.valueOf(r.get("ref_work_order")), k -> new java.math.BigDecimal[]{ java.math.BigDecimal.ZERO, java.math.BigDecimal.ZERO });
+                v[0] = v[0].add(bd(r.get("pq")).multiply(unit));
+                v[1] = v[1].add(bd(r.get("aq")).multiply(unit));
+            }
+            List<Map<String,Object>> rows = new ArrayList<>();
+            java.math.BigDecimal totCost = java.math.BigDecimal.ZERO, totRevenue = java.math.BigDecimal.ZERO;
+            int profitCnt = 0;
+            for (Map<String,Object> w : wos) {
+                String no = String.valueOf(w.get("work_order_no"));
+                java.math.BigDecimal actualQty = bd(w.get("actual_qty"));
+                java.math.BigDecimal[] req = reqMap.getOrDefault(no, new java.math.BigDecimal[]{ java.math.BigDecimal.ZERO, java.math.BigDecimal.ZERO });
+                java.math.BigDecimal materialCost = req[1].setScale(2, java.math.RoundingMode.HALF_UP);
+                java.math.BigDecimal laborCost = actualQty.multiply(LABOR_RATE).setScale(2, java.math.RoundingMode.HALF_UP);
+                java.math.BigDecimal overheadCost = actualQty.multiply(OVERHEAD_RATE).setScale(2, java.math.RoundingMode.HALF_UP);
+                java.math.BigDecimal totalCost = materialCost.add(laborCost).add(overheadCost);
+                java.math.BigDecimal estRevenue = actualQty.multiply(priceMap.getOrDefault(String.valueOf(w.get("product_code")), java.math.BigDecimal.ZERO)).setScale(2, java.math.RoundingMode.HALF_UP);
+                java.math.BigDecimal profit = estRevenue.subtract(totalCost);
+                java.math.BigDecimal unitCost = actualQty.signum() > 0 ? totalCost.divide(actualQty, 2, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO;
+                Map<String,Object> row = new LinkedHashMap<>(w);
+                row.put("material_cost", materialCost);
+                row.put("plan_material_cost", req[0].setScale(2, java.math.RoundingMode.HALF_UP));
+                row.put("labor_cost", laborCost);
+                row.put("overhead_cost", overheadCost);
+                row.put("total_cost", totalCost);
+                row.put("est_revenue", estRevenue);
+                row.put("profit", profit);
+                row.put("unit_cost", unitCost);
+                totCost = totCost.add(totalCost);
+                totRevenue = totRevenue.add(estRevenue);
+                if (actualQty.signum() > 0 && profit.signum() > 0) profitCnt++;
+                rows.add(row);
+            }
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("count", rows.size());
+            totals.put("cost", totCost);
+            totals.put("revenue", totRevenue);
+            totals.put("profit", totRevenue.subtract(totCost));
+            totals.put("profit_cnt", profitCnt);
+            totals.put("labor_rate", LABOR_RATE);
+            totals.put("overhead_rate", OVERHEAD_RATE);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", rows); ret.put("totals", totals);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("工单成本分析加载失败: " + e.getMessage()); }
+    }
+
+    // ── 经营预测（v5.29）：近 9 月销售 → 加权均值+线性趋势 → 下月预测 vs 目标 ──
+    @GetMapping("/sales-forecast") public Result salesForecast() {
+        try {
+            List<Map<String,Object>> hist = db.queryForList(
+                "SELECT DATE_FORMAT(sales_date,'%Y-%m') month, COALESCE(SUM(total_amount),0) amt FROM trade_sales_main GROUP BY DATE_FORMAT(sales_date,'%Y-%m') ORDER BY month DESC LIMIT 9");
+            java.util.Collections.reverse(hist); // 升序
+            List<Map<String,Object>> history = new ArrayList<>();
+            int n = hist.size();
+            double[] ys = new double[n];
+            for (int i = 0; i < n; i++) {
+                ys[i] = bd(hist.get(i).get("amt")).doubleValue();
+                Map<String,Object> h = new LinkedHashMap<>();
+                h.put("month", hist.get(i).get("month"));
+                h.put("amount", bd(hist.get(i).get("amt")));
+                history.add(h);
+            }
+            // 加权移动均值（近3月权重 1/2/3）
+            double weighted = 0;
+            if (n >= 3) weighted = (ys[n - 3] * 1 + ys[n - 2] * 2 + ys[n - 1] * 3) / 6.0;
+            else if (n > 0) { double s = 0; for (double y : ys) s += y; weighted = s / n; }
+            // 线性回归趋势外推
+            double trendNext = weighted;
+            if (n >= 4) {
+                double sx = 0, sy = 0, sxx = 0, sxy = 0;
+                for (int i = 0; i < n; i++) { sx += i; sy += ys[i]; sxx += (double) i * i; sxy += i * ys[i]; }
+                double denom = n * sxx - sx * sx;
+                double slope = denom == 0 ? 0 : (n * sxy - sx * sy) / denom;
+                double intercept = (sy - slope * sx) / n;
+                trendNext = intercept + slope * n;
+            }
+            double blended = Math.max(0, 0.5 * weighted + 0.5 * trendNext);
+            // 下个月与目标
+            String nextMonth = db.queryForObject("SELECT DATE_FORMAT(DATE_ADD(CURDATE(), INTERVAL 1 MONTH),'%Y-%m')", String.class);
+            java.math.BigDecimal target = db.queryForObject("SELECT COALESCE(SUM(target_amount),0) FROM trade_sales_target WHERE target_month=?", java.math.BigDecimal.class, nextMonth);
+            if (target == null) target = java.math.BigDecimal.ZERO;
+            java.math.BigDecimal forecast = new java.math.BigDecimal(blended).setScale(2, java.math.RoundingMode.HALF_UP);
+            java.math.BigDecimal rate = target.signum() > 0
+                ? forecast.multiply(new java.math.BigDecimal("100")).divide(target, 1, java.math.RoundingMode.HALF_UP)
+                : java.math.BigDecimal.ZERO;
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("history", history);
+            ret.put("next_month", nextMonth);
+            ret.put("forecast", forecast);
+            ret.put("weighted", new java.math.BigDecimal(weighted).setScale(2, java.math.RoundingMode.HALF_UP));
+            ret.put("trend", new java.math.BigDecimal(trendNext).setScale(2, java.math.RoundingMode.HALF_UP));
+            ret.put("target", target);
+            ret.put("rate", rate);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("销售预测加载失败: " + e.getMessage()); }
+    }
+
     // ── 回收站恢复 ──
     @PostMapping("/restore/{backupId}")
     @SuppressWarnings("unchecked")

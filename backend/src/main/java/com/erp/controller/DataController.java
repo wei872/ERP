@@ -49,6 +49,32 @@ public class DataController {
         TABLE_ROLE_MAP.put("fin_", new HashSet<>(Arrays.asList("admin","accounting")));
     }
 
+    /** 敏感字段脱敏（v5.29）：列名含 phone/mobile → 手机号中间四位掩码；含 email → 邮箱掩码 */
+    private void maskSensitive(List<Map<String,Object>> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        for (Map<String,Object> row : rows) {
+            for (Map.Entry<String,Object> e : row.entrySet()) {
+                String k = e.getKey() == null ? "" : e.getKey().toLowerCase();
+                Object v = e.getValue();
+                if (v == null) continue;
+                String s = String.valueOf(v);
+                if (s.isEmpty()) continue;
+                if (k.contains("phone") || k.contains("mobile")) {
+                    String digits = s.replaceAll("[^0-9]", "");
+                    if (digits.length() >= 7) {
+                        e.setValue(digits.substring(0, 3) + "****" + digits.substring(digits.length() - 4));
+                    } else if (digits.length() >= 4) {
+                        e.setValue(digits.substring(0, 1) + "***" + digits.substring(digits.length() - 2));
+                    }
+                } else if (k.contains("email")) {
+                    int at = s.indexOf('@');
+                    if (at > 1) e.setValue(s.charAt(0) + "***" + s.substring(at));
+                    else if (at == 1) e.setValue("*" + s.substring(at));
+                }
+            }
+        }
+    }
+
     /** 文本列（搜索用），来自元数据缓存 */
     private List<String> getTextColumns(String t) {
         List<String> cols = new ArrayList<>();
@@ -136,6 +162,7 @@ public class DataController {
     public Result query(@PathVariable String table, @RequestParam(defaultValue="1") int page,
                         @RequestParam(defaultValue="15") int size, @RequestParam(defaultValue="") String search,
                         @RequestParam(defaultValue="") String sort, @RequestParam(defaultValue="") String dir,
+                        @RequestParam(defaultValue="false") boolean unmask,
                         HttpServletRequest req) {
         try {
             String t = safe(table);
@@ -168,6 +195,8 @@ public class DataController {
             }
             params.add(size);params.add((page-1)*size);
             List<Map<String,Object>> rows=db.queryForList("SELECT * FROM "+t+where+orderBy+" LIMIT ? OFFSET ?",params.toArray());
+            // 敏感数据脱敏（v5.29）：手机号/邮箱默认脱敏；仅管理员可显式查看明文
+            if (!(unmask && "admin".equals(role))) maskSensitive(rows);
             return Result.ok(map("total",total,"page",page,"rows",rows));
         } catch (IllegalArgumentException e) {
             return Result.error(e.getMessage());

@@ -680,6 +680,32 @@ insert('finance_receivable_main', ['receivable_no', 'customer_code', 'customer_n
     const overdue = remain > 0 && dueDaysAgo > 0 ? dueDaysAgo : 0;
     return [q(`RCV-D-${pad(i + 1, 4)}`), q(customers[s.custIdx][0]), q(customers[s.custIdx][1]), money(total), money(received), money(remain), dAgo(dueDaysAgo), overdue, q(status), q(`销售单:${s.no}`)];
   }));
+
+// ── 催收记录（v5.29）：取逾期最久的 4 笔应收，各登记 1~2 次催收过程 ──
+{
+  const rcvIdx = sales
+    .map((s, idx) => ({ s, idx }))
+    .filter(x => x.s.status !== '待审核')
+    .map((x, fi) => {
+      const total = x.s.lines.reduce((t, l) => t + l.qty * l.price, 0);
+      const rc = receipts.find(r => r.sale === x.s);
+      const remain = Math.round((total - (rc ? rc.amount : 0)) * 100) / 100;
+      const dueDaysAgo = x.s.m * 30 + x.s.day - 30;
+      return { no: `RCV-D-${pad(fi + 1, 4)}`, cust: customers[x.s.custIdx], remain, overdue: remain > 0 && dueDaysAgo > 0 ? dueDaysAgo : 0 };
+    })
+    .filter(x => x.overdue > 0)
+    .sort((a, b) => b.overdue - a.overdue)
+    .slice(0, 4);
+  const collRows = [];
+  const methods = ['电话', '邮件', '微信', '催款函'];
+  const results = ['承诺付款', '需再跟进', '无回应', '承诺付款'];
+  rcvIdx.forEach((x, i) => {
+    collRows.push([q(`COL-${pad(i * 2 + 1, 4)}`), q(x.no), q(x.cust[0]), q(x.cust[1]), q(methods[i % 4]), q(x.cust[4]), q(`电话沟通回款安排，对方确认对账无误`), q(results[i % 4]), dAgo(Math.max(0, Math.round(x.overdue / 2))), q(i % 2 === 0 ? '张三' : '王小明'), dAgo(Math.min(x.overdue, 6 + i * 3))]);
+    if (i < 2) collRows.push([q(`COL-${pad(i * 2 + 2, 4)}`), q(x.no), q(x.cust[0]), q(x.cust[1]), q('催款函'), q(x.cust[4]), q(`已发送正式催款函，要求 5 个工作日内付款`), q('需再跟进'), dAgo(2), q(i % 2 === 0 ? '张三' : '王小明'), dAgo(Math.max(0, Math.min(x.overdue, 2 + i)))]);
+  });
+  if (collRows.length) insert('finance_collection_record', ['receivable_no', 'customer_code', 'customer_name', 'method', 'contact_person', 'content', 'result', 'next_follow_date', 'collector', 'collect_date'],
+    collRows.map(r => [r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10]]));
+}
 insert('finance_payable_main', ['payable_no', 'supplier_code', 'supplier_name', 'total_amount', 'paid_amount', 'remain_amount', 'due_date', 'status', 'remark'],
   purchases.filter(p => p.status !== '待审批').map((p, i) => {
     const total = p.lines.reduce((t, l) => t + l.qty * l.price, 0);

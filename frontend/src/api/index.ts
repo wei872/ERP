@@ -34,7 +34,7 @@ export const authApi = {
   getMe: () => request('/auth/me'),
 };
 export const dataApi = {
-  list: (t: string, page = 1, size = 100, s = '', sort = '', dir = '') => request<{ total: number; rows: any[] }>(`/data/${t}?page=${page}&size=${size}&search=${encodeURIComponent(s)}&sort=${encodeURIComponent(sort)}&dir=${dir}`),
+  list: (t: string, page = 1, size = 100, s = '', sort = '', dir = '', unmask = false) => request<{ total: number; rows: any[] }>(`/data/${t}?page=${page}&size=${size}&search=${encodeURIComponent(s)}&sort=${encodeURIComponent(sort)}&dir=${dir}${unmask ? '&unmask=1' : ''}`),
   create: (t: string, d: Record<string, unknown>) => request(`/data/${t}`, { method: 'POST', body: JSON.stringify(d) }),
   update: (t: string, id: number, d: Record<string, unknown>) => request(`/data/${t}/${id}`, { method: 'PUT', body: JSON.stringify(d) }),
   delete: (t: string, id: number) => request(`/data/${t}/${id}`, { method: 'DELETE' }),
@@ -102,6 +102,11 @@ export const bizApi = {
   planCollect: (body: { id: number; amount: number }) => request<any>('/biz/contract-plan/collect', { method: 'POST', body: JSON.stringify(body) }),
   invoiceCreate: (body: { contract_no: string; invoice_type?: string; amount: number; tax_rate?: number; invoice_date?: string; remark?: string }) => request<any>('/biz/invoice/create', { method: 'POST', body: JSON.stringify(body) }),
   invoiceVoid: (id: number) => request<any>(`/biz/invoice/void/${id}`, { method: 'POST' }),
+  collectionBoard: () => request<any>('/biz/collection/board'),
+  collectionAdd: (body: { receivable_no: string; method: string; contact_person?: string; content?: string; result: string; next_follow_date?: string }) => request<any>('/biz/collection/add', { method: 'POST', body: JSON.stringify(body) }),
+  collectionRecords: (receivableNo: string) => request<any[]>(`/biz/collection/records?receivable_no=${encodeURIComponent(receivableNo)}`),
+  workorderCost: () => request<any>('/biz/workorder-cost'),
+  salesForecast: () => request<any>('/biz/sales-forecast'),
   restoreBackup: (id: number) => request<any>(`/biz/restore/${id}`, { method: 'POST' }),
   companies: () => request<any[]>('/biz/companies'),
   budgetUsage: (department: string) => request<any>(`/biz/budget-usage?department=${encodeURIComponent(department)}`),

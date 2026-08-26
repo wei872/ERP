@@ -458,6 +458,25 @@ INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, s
 ('cust_contract_payment_plan','合同收款计划','客户供应商','合同档案',932),
 ('cust_contract_invoice','合同开票登记','客户供应商','合同档案',933);
 
+-- ── 催收管理（v5.29）：逾期应收催收记录台账 ──
+CREATE TABLE IF NOT EXISTS finance_collection_record (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  receivable_no VARCHAR(50) COMMENT '应收单号',
+  customer_code VARCHAR(50),
+  customer_name VARCHAR(100),
+  method VARCHAR(20) COMMENT '电话/邮件/微信/上门/催款函',
+  contact_person VARCHAR(50) COMMENT '对方联系人',
+  content TEXT COMMENT '催收内容',
+  result VARCHAR(20) COMMENT '承诺付款/需再跟进/无回应/已回款',
+  next_follow_date DATE COMMENT '下次跟进日期',
+  collector VARCHAR(50) COMMENT '催收人',
+  collect_date DATE,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('finance_collection_record','催收记录','财务管理','应收管理',934);
+
 -- ── 销售提成（v5.26）：按目标达成率阶梯计提，审批后联动工资表 ──
 CREATE TABLE IF NOT EXISTS hr_sales_commission (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

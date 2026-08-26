@@ -192,11 +192,13 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
   const canDelete = isAdmin || perms.some((p: any) => (p.module === moduleName || p.module === 'all') && p.canDelete === true);
 
   // 🔧 把 search / sort 参数传给后端，触发后端 LIKE 搜索与列排序
+  // 敏感数据明文开关（仅管理员有效，v5.29）：默认列表手机号/邮箱脱敏
+  const [showPlain, setShowPlain] = useState(false);
   const fetchData = useCallback(async (pg: number, kw: string, sc: string = '', sd: string = '') => {
     if (!table) return;
     setLoading(true); setError('');
     try {
-      const r = await dataApi.list(tableKey, pg, pageSize, kw, sc, sd);
+      const r = await dataApi.list(tableKey, pg, pageSize, kw, sc, sd, showPlain && currentUser?.role === 'admin');
       if (r.data && Array.isArray(r.data.rows)) {
         setData(r.data.rows);
         setTotalRows(r.data.total || 0);
@@ -206,7 +208,7 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
       setData([]); setTotalRows(0);
     }
     setLoaded(true); setLoading(false);
-  }, [table, tableKey, pageSize]);
+  }, [table, tableKey, pageSize, showPlain, currentUser?.role]);
 
   // 首次加载 + tableKey 变化（列元数据就绪后才拉数据；支持钻取带入初始搜索）
   useEffect(() => { setLoaded(false); setSearch(initialSearch); setCurrentPage(1); setSortCol(''); setSortDir('desc'); if (table) fetchData(1, initialSearch); }, [tableKey, table, initialSearch]);
@@ -220,6 +222,8 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
 
   // 翻页触发
   useEffect(() => { if (loaded) fetchData(currentPage, search); }, [currentPage]);
+  // 明文/脱敏切换后重载数据（v5.29）
+  useEffect(() => { if (loaded) fetchData(currentPage, search, sortCol, sortDir); }, [showPlain]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 🔧 搜索触发（去抖）
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -445,7 +449,10 @@ export default function ModulePage({ tableKey, initialSearch = '' }: { tableKey:
           <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <input type="text" value={search} onChange={e => doSearch(e.target.value)} placeholder="搜索..." className="erp-input pl-9 w-56"/>
         </div>
-        <button onClick={() => bizApi.exportTableCsv(tableKey).catch(e => toastFn('导出失败: ' + e.message))} className="erp-btn erp-btn-ghost" title="导出 CSV">⬇ CSV</button>
+        <button onClick={() => bizApi.exportTableCsv(tableKey).catch(e => toastFn('导出失败: ' + e.message))} className="erp-btn erp-btn-ghost" title="导出 CSV（手机号/邮箱自动脱敏）">⬇ CSV</button>
+        {currentUser?.role === 'admin' && (
+          <button onClick={() => { setShowPlain(p => !p); toastNotify(showPlain ? '已恢复脱敏显示' : '明文显示已开启（仅管理员，操作界面可见完整手机号/邮箱）', showPlain ? 'success' : 'warn'); }} className={`erp-btn erp-btn-ghost ${showPlain ? 'ring-2 ring-amber-300' : ''}`} title="敏感数据明文显示（仅管理员）">{showPlain ? '👁 明文开' : '🕶 已脱敏'}</button>
+        )}
         {/* Excel 批量导入（商品/客户） */}
         {IMPORT_CFG[tableKey] && (<>
           <button onClick={() => importRef.current?.click()} className="erp-btn erp-btn-ghost" title="Excel 批量导入（按模板格式）">⬆ 导入</button>
