@@ -93,6 +93,54 @@ export default function InventoryAnalysisPage() {
           <p className="text-[10px] text-slate-400 mt-3">处理建议：促销清仓 / 调拨他用 / 计提减值</p>
         </div>
       </div>
+
+      {/* ABC 分析（v5.30）：按库存金额累计占比分类管理 */}
+      {data.abc && (
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><span className="w-1 h-4 rounded-full bg-gradient-to-b from-violet-500 to-fuchsia-500"></span>库存 ABC 分类（按金额累计占比：A≤70% / B≤90% / C&gt;90%）</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {(data.abc.classes || []).map((cl: any) => {
+                const tone = cl.class === 'A' ? 'border-violet-200 bg-violet-50/60' : cl.class === 'B' ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-slate-50';
+                const pct = Number(data.abc.total_value || 0) > 0 ? (Number(cl.value || 0) / Number(data.abc.total_value)) * 100 : 0;
+                const advice = cl.class === 'A' ? '重点管控：循环盘点每月一次、安全库存复核、采购议价' : cl.class === 'B' ? '常规管控：季度盘点、按周转率调订货点' : '简化管理：放宽盘点频率、关注呆滞、批量采购降本';
+                return (
+                  <div key={cl.class} className={`rounded-2xl border p-4 ${tone}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="w-8 h-8 rounded-xl bg-white shadow-sm flex items-center justify-center text-base font-bold text-slate-700">{cl.class}</span>
+                      <span className="text-[11px] text-slate-500">金额占比 <b className="tabular-nums text-slate-700">{pct.toFixed(1)}%</b></span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 tabular-nums">{Number(cl.count || 0)} 种物料 · ¥{money(cl.value)}</p>
+                    <p className="text-[10px] text-slate-500 mt-1.5 leading-relaxed">{advice}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="erp-card p-4 md:p-5 overflow-x-auto">
+            <h4 className="text-sm font-semibold text-slate-700 mb-3">TOP 30 高价值物料</h4>
+            <table className="erp-table text-xs w-full min-w-[640px]">
+              <thead><tr><th className="text-left">物料</th><th>分类</th><th>库存数量</th><th>库存金额</th><th>累计占比</th></tr></thead>
+              <tbody>
+                {(data.abc.items || []).map((it: any) => (
+                  <tr key={it.product_code}>
+                    <td className="text-left"><p className="font-medium text-slate-700 whitespace-nowrap">{it.product_name}</p><p className="font-mono text-[10px] text-slate-400">{it.product_code}</p></td>
+                    <td><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${it.class === 'A' ? 'bg-violet-100 text-violet-600' : it.class === 'B' ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>{it.class} 类</span></td>
+                    <td className="tabular-nums">{Number(it.qty || 0).toLocaleString()}</td>
+                    <td className="tabular-nums font-semibold">¥{money(it.value)}</td>
+                    <td className="min-w-[120px]">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden flex-1"><div className="h-full rounded-full bg-gradient-to-r from-violet-400 to-fuchsia-400" style={{ width: `${Math.min(100, Number(it.cum_pct || 0))}%` }}></div></div>
+                        <span className="tabular-nums text-[10px] text-slate-400 shrink-0">{Number(it.cum_pct || 0).toFixed(1)}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

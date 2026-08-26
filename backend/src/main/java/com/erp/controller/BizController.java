@@ -1705,6 +1705,142 @@ public class BizController {
         } catch (Exception e) { return Result.error("销售预测加载失败: " + e.getMessage()); }
     }
 
+    // ── 客户 360 视图（v5.30）：档案 + 信用 + 订单 + 应收 + 合同 + 催收 一屏聚合 ──
+    @GetMapping("/customer-360/{code}") public Result customer360(@PathVariable String code) {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            List<Map<String,Object>> cust = db.queryForList("SELECT * FROM cust_customer_main WHERE customer_code=?", code);
+            if (cust.isEmpty()) return Result.error("客户不存在: " + code);
+            ret.put("customer", cust.get(0));
+            ret.put("credit", credit.usage(code));
+            String name = String.valueOf(cust.get(0).getOrDefault("customer_name", ""));
+            ret.put("orders", db.queryForList("SELECT sales_no, sales_date, total_amount, sales_status, shipping_status, sales_person, contract_no FROM trade_sales_main WHERE customer_code=? ORDER BY sales_date DESC LIMIT 30", code));
+            ret.put("orderStats", db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(total_amount),0) amount FROM trade_sales_main WHERE customer_code=?", code).get(0));
+            ret.put("receivables", db.queryForList("SELECT receivable_no, total_amount, received_amount, remain_amount, due_date, status FROM finance_receivable_main WHERE customer_code=? AND remain_amount>0 ORDER BY due_date ASC LIMIT 20", code));
+            ret.put("receivableStats", db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(remain_amount),0) remain FROM finance_receivable_main WHERE customer_code=? AND remain_amount>0", code).get(0));
+            try { ret.put("contracts", db.queryForList("SELECT contract_no, contract_name, contract_type, amount, end_date, status FROM cust_contract_main WHERE party_name=? ORDER BY end_date DESC LIMIT 10", name)); }
+            catch (Exception e) { ret.put("contracts", new ArrayList<>()); }
+            try { ret.put("collections", db.queryForList("SELECT method, result, content, collector, collect_date, next_follow_date FROM finance_collection_record WHERE customer_code=? ORDER BY id DESC LIMIT 20", code)); }
+            catch (Exception e) { ret.put("collections", new ArrayList<>()); }
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("客户 360 加载失败: " + e.getMessage()); }
+    }
+
+    // ── 生产排程看板（v5.30）：工单排程条 + 逾期预警 + 车间负载 ──
+    @GetMapping("/production-schedule") public Result productionSchedule() {
+        try {
+            List<Map<String,Object>> wos = db.queryForList(
+                "SELECT work_order_no, product_code, product_name, plan_qty, actual_qty, complete_qty, workshop, leader, " +
+                "start_date, plan_end_date, order_status, priority FROM prod_work_order ORDER BY start_date DESC LIMIT 100");
+            java.time.LocalDate today = java.time.LocalDate.now();
+            java.time.LocalDate min = null, max = null;
+            int inProgress = 0, overdue = 0, finished = 0;
+            Map<String, Map<String,Object>> workshops = new LinkedHashMap<>();
+            for (Map<String,Object> w : wos) {
+                java.time.LocalDate s = null, e = null;
+                try { s = java.time.LocalDate.parse(String.valueOf(w.get("start_date")).substring(0, 10)); } catch (Exception ignored) {}
+                try { e = java.time.LocalDate.parse(String.valueOf(w.get("plan_end_date")).substring(0, 10)); } catch (Exception ignored) {}
+                String status = String.valueOf(w.getOrDefault("order_status", ""));
+                long overdueDays = 0;
+                if (e != null && !"已完成".equals(status) && e.isBefore(today)) { overdueDays = java.time.temporal.ChronoUnit.DAYS.between(e, today); overdue++; }
+                if ("已完成".equals(status)) finished++;
+                else if ("进行中".equals(status) || "待排产".equals(status) || "已下达".equals(status)) inProgress++;
+                java.math.BigDecimal plan = bd(w.get("plan_qty")), act = bd(w.get("actual_qty"));
+                w.put("progress", plan.signum() > 0 ? act.multiply(new java.math.BigDecimal("100")).divide(plan, 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+                w.put("overdue_days", overdueDays);
+                if (s != null && (min == null || s.isBefore(min))) min = s;
+                java.time.LocalDate endRef = e != null ? e : (s != null ? s.plusDays(7) : today);
+                if (max == null || endRef.isAfter(max)) max = endRef;
+                // 车间负载
+                String shop = String.valueOf(w.getOrDefault("workshop", "未指派"));
+                Map<String,Object> load = workshops.computeIfAbsent(shop, k -> {
+                    Map<String,Object> m = new LinkedHashMap<>();
+                    m.put("workshop", k); m.put("active_orders", 0L); m.put("active_qty", java.math.BigDecimal.ZERO); m.put("overdue_orders", 0L);
+                    return m;
+                });
+                if (!"已完成".equals(status)) {
+                    load.put("active_orders", ((Number) load.get("active_orders")).longValue() + 1);
+                    load.put("active_qty", bd(load.get("active_qty")).add(plan));
+                    if (overdueDays > 0) load.put("overdue_orders", ((Number) load.get("overdue_orders")).longValue() + 1);
+                }
+            }
+            if (min == null) min = today.minusDays(30);
+            if (max == null || !max.isAfter(min)) max = min.plusDays(30);
+            if (today.plusDays(7).isAfter(max)) max = today.plusDays(7);
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("count", wos.size());
+            totals.put("in_progress", inProgress);
+            totals.put("overdue", overdue);
+            totals.put("finished", finished);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", wos);
+            ret.put("totals", totals);
+            ret.put("range_start", min.toString());
+            ret.put("range_end", max.toString());
+            ret.put("today", today.toString());
+            ret.put("workshops", new ArrayList<>(workshops.values()));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("生产排程加载失败: " + e.getMessage()); }
+    }
+
+    // ── 部门预算编制与执行看板（v5.30）──
+    @GetMapping("/budget-dashboard") public Result budgetDashboard(@RequestParam(required = false, defaultValue = "") String month) {
+        try {
+            String m = month.trim().isEmpty() ? db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m')", String.class) : month.trim();
+            if (!m.matches("\\d{4}-\\d{2}")) return Result.error("月份格式须为 yyyy-MM");
+            List<Map<String,Object>> budgets = db.queryForList("SELECT department, budget_amount, remark FROM oa_budget WHERE budget_month=? ORDER BY budget_amount DESC", m);
+            List<Map<String,Object>> spent = db.queryForList(
+                "SELECT department, COALESCE(SUM(amount),0) used FROM oa_approval_main WHERE approval_type='费用审批' " +
+                "AND approval_status IN ('待审批','已通过') AND DATE_FORMAT(submit_date,'%Y-%m')=? GROUP BY department", m);
+            Map<String, java.math.BigDecimal> usedMap = new LinkedHashMap<>();
+            for (Map<String,Object> s : spent) usedMap.put(String.valueOf(s.get("department")), bd(s.get("used")));
+            List<Map<String,Object>> rows = new ArrayList<>();
+            java.math.BigDecimal totBudget = java.math.BigDecimal.ZERO, totUsed = java.math.BigDecimal.ZERO;
+            int overCnt = 0;
+            for (Map<String,Object> b : budgets) {
+                String dept = String.valueOf(b.get("department"));
+                java.math.BigDecimal budget = bd(b.get("budget_amount"));
+                java.math.BigDecimal used = usedMap.getOrDefault(dept, java.math.BigDecimal.ZERO);
+                java.math.BigDecimal rate = budget.signum() > 0
+                    ? used.multiply(new java.math.BigDecimal("100")).divide(budget, 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO;
+                Map<String,Object> row = new LinkedHashMap<>();
+                row.put("department", dept);
+                row.put("budget", budget);
+                row.put("used", used);
+                row.put("available", budget.subtract(used));
+                row.put("rate", rate);
+                row.put("remark", b.get("remark"));
+                if (rate.compareTo(new java.math.BigDecimal("100")) > 0) overCnt++;
+                totBudget = totBudget.add(budget);
+                totUsed = totUsed.add(used);
+                rows.add(row);
+            }
+            Map<String,Object> totals = new LinkedHashMap<>();
+            totals.put("month", m);
+            totals.put("budget", totBudget);
+            totals.put("used", totUsed);
+            totals.put("rate", totBudget.signum() > 0 ? totUsed.multiply(new java.math.BigDecimal("100")).divide(totBudget, 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+            totals.put("over_count", overCnt);
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("rows", rows); ret.put("totals", totals);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("预算看板加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/budget-set") public Result budgetSet(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req)) && !"accounting".equals(role(req)) && !"hr".equals(role(req))) return Result.error("权限不足");
+        try {
+            String dept = String.valueOf(body.getOrDefault("department", "")).trim();
+            String m = String.valueOf(body.getOrDefault("budget_month", "")).trim();
+            java.math.BigDecimal amt = body.get("budget_amount") == null ? java.math.BigDecimal.ZERO : new java.math.BigDecimal(String.valueOf(body.get("budget_amount")));
+            if (dept.isEmpty() || !m.matches("\\d{4}-\\d{2}") || amt.signum() <= 0) return Result.error("部门/月份/预算金额必填（金额须大于 0）");
+            db.update("INSERT INTO oa_budget(department,budget_month,budget_amount,remark) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE budget_amount=VALUES(budget_amount), remark=VALUES(remark)",
+                dept, m, amt, String.valueOf(body.getOrDefault("remark", "预算编制")));
+            audit.log(user(req), "预算", "编制预算", dept + " " + m + " ¥" + amt, audit.getIp(req));
+            return Result.ok("预算已保存");
+        } catch (Exception e) { return Result.error("预算编制失败: " + e.getMessage()); }
+    }
+
     // ── 回收站恢复 ──
     @PostMapping("/restore/{backupId}")
     @SuppressWarnings("unchecked")
@@ -2134,6 +2270,47 @@ public class BizController {
                 for (String m : months) trend.add(byMonth.get(m));
             } catch (Exception ignored) {}
             ret.put("trend", trend);
+            // ABC 分析（v5.30）：按库存金额降序累计占比 → A(≤70%)/B(≤90%)/C
+            try {
+                List<Map<String,Object>> items = db.queryForList(
+                    "SELECT product_code, MAX(product_name) product_name, SUM(qty) qty, SUM(total_value) value " +
+                    "FROM trade_inventory_balance WHERE total_value>0 GROUP BY product_code ORDER BY value DESC LIMIT 500");
+                java.math.BigDecimal totalValue = java.math.BigDecimal.ZERO;
+                for (Map<String,Object> it : items) totalValue = totalValue.add(bd(it.get("value")));
+                java.math.BigDecimal cum = java.math.BigDecimal.ZERO;
+                long aCnt = 0, bCnt = 0, cCnt = 0;
+                java.math.BigDecimal aVal = java.math.BigDecimal.ZERO, bVal = java.math.BigDecimal.ZERO, cVal = java.math.BigDecimal.ZERO;
+                List<Map<String,Object>> abcItems = new ArrayList<>();
+                for (Map<String,Object> it : items) {
+                    java.math.BigDecimal val = bd(it.get("value"));
+                    cum = cum.add(val);
+                    double pct = totalValue.signum() > 0 ? cum.divide(totalValue, 4, java.math.RoundingMode.HALF_UP).doubleValue() * 100 : 100;
+                    String cls = pct <= 70 ? "A" : pct <= 90 ? "B" : "C";
+                    if ("A".equals(cls)) { aCnt++; aVal = aVal.add(val); }
+                    else if ("B".equals(cls)) { bCnt++; bVal = bVal.add(val); }
+                    else { cCnt++; cVal = cVal.add(val); }
+                    if (abcItems.size() < 30) {
+                        Map<String,Object> r = new LinkedHashMap<>(it);
+                        r.put("class", cls);
+                        r.put("cum_pct", new java.math.BigDecimal(pct).setScale(1, java.math.RoundingMode.HALF_UP));
+                        abcItems.add(r);
+                    }
+                }
+                Map<String,Object> abc = new LinkedHashMap<>();
+                abc.put("items", abcItems);
+                List<Map<String,Object>> classes = new ArrayList<>();
+                String[] clsNames = { "A", "B", "C" };
+                long[] clsCnt = { aCnt, bCnt, cCnt };
+                java.math.BigDecimal[] clsVal = { aVal, bVal, cVal };
+                for (int i = 0; i < 3; i++) {
+                    Map<String,Object> cm = new LinkedHashMap<>();
+                    cm.put("class", clsNames[i]); cm.put("count", clsCnt[i]); cm.put("value", clsVal[i]);
+                    classes.add(cm);
+                }
+                abc.put("classes", classes);
+                abc.put("total_value", totalValue);
+                ret.put("abc", abc);
+            } catch (Exception e) { ret.put("abc", null); }
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("库存分析加载失败: " + e.getMessage()); }
     }

@@ -45,6 +45,9 @@ const MobileWorkbenchPage = lazy(() => import('./MobileWorkbenchPage'));
 const CollectionPage = lazy(() => import('./CollectionPage'));
 const WorkOrderCostPage = lazy(() => import('./WorkOrderCostPage'));
 const ForecastPage = lazy(() => import('./ForecastPage'));
+const Customer360Page = lazy(() => import('./Customer360Page'));
+const ProductionSchedulePage = lazy(() => import('./ProductionSchedulePage'));
+const BudgetDashboardPage = lazy(() => import('./BudgetDashboardPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -54,7 +57,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' } | { type: 'scorecard' } | { type: 'workbench' } | { type: 'collection' } | { type: 'wocost' } | { type: 'forecast' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' } | { type: 'scorecard' } | { type: 'workbench' } | { type: 'collection' } | { type: 'wocost' } | { type: 'forecast' } | { type: 'customer360'; code?: string } | { type: 'schedule' } | { type: 'budget' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -81,6 +84,9 @@ const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[]
   { type: 'wocost',         label: '工单成本分析', icon: '🏭', roles: ['admin','production','accounting'] },
   { type: 'profit',         label: '毛利分析',     icon: '💹', roles: ['admin','accounting','sales'] },
   { type: 'production',     label: '生产管理',     icon: '🏗️', roles: ['admin','production','warehouse'] },
+  { type: 'schedule',       label: '生产排程看板', icon: '📅', roles: ['admin','production','warehouse'] },
+  { type: 'customer360',    label: '客户360视图',  icon: '👤', roles: ['admin','sales','accounting'] },
+  { type: 'budget',         label: '部门预算看板', icon: '🧮', roles: ['admin','accounting','hr'] },
   { type: 'mrp',            label: 'MRP运算',      icon: '🧮', roles: ['admin','production'] },
   { type: 'ops',            label: '库存直调&期末', icon: '🛠️', roles: ['admin','warehouse','accounting'] },
   { type: 'audit',          label: '审计日志',     icon: '🕵️', roles: ['admin'] },
@@ -139,6 +145,9 @@ export default function Layout() {
     { label: '催收管理中心', icon: '📣', page: { type: 'collection' } },
     { label: '经营预测', icon: '🔮', page: { type: 'forecast' } },
     { label: '工单成本分析', icon: '🏭', page: { type: 'wocost' } },
+    { label: '客户360视图', icon: '👤', page: { type: 'customer360' } },
+    { label: '生产排程看板', icon: '📅', page: { type: 'schedule' } },
+    { label: '部门预算看板', icon: '🧮', page: { type: 'budget' } },
     { label: '生产管理', icon: '🏗️', page: { type: 'production' } },
     { label: 'MRP运算', icon: '🧮', page: { type: 'mrp' } },
     { label: '库存直调&期末', icon: '🛠️', page: { type: 'ops' } },
@@ -497,6 +506,9 @@ export default function Layout() {
         {page.type === 'collection' && <CollectionPage />}
         {page.type === 'wocost' && <WorkOrderCostPage />}
         {page.type === 'forecast' && <ForecastPage />}
+        {page.type === 'customer360' && <Customer360Page initialCode={page.code || ''} />}
+        {page.type === 'schedule' && <ProductionSchedulePage />}
+        {page.type === 'budget' && <BudgetDashboardPage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}
