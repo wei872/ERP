@@ -477,6 +477,27 @@ CREATE TABLE IF NOT EXISTS finance_collection_record (
 INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
 ('finance_collection_record','催收记录','财务管理','应收管理',934);
 
+-- ── 系统参数配置中心（v5.31）：业务计算参数统一管理，后端动态取参 ──
+CREATE TABLE IF NOT EXISTS sys_config (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  config_key VARCHAR(60) COMMENT '参数键',
+  config_value VARCHAR(200) COMMENT '参数值',
+  description VARCHAR(200) COMMENT '参数说明',
+  group_name VARCHAR(40) COMMENT '参数分组',
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_config_key (config_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+INSERT IGNORE INTO sys_config(config_key, config_value, description, group_name) VALUES
+('labor_rate', '15', '工单成本分析：人工费标准费率（元/件）', '生产成本'),
+('overhead_rate', '8', '工单成本分析：制造费用标准费率（元/件）', '生产成本'),
+('abc_a_threshold', '70', '库存 ABC 分析：A 类累计金额占比上限（%）', '库存策略'),
+('abc_b_threshold', '90', '库存 ABC 分析：B 类累计金额占比上限（%）', '库存策略'),
+('credit_block_enabled', 'true', '信用中枢：下单超额拦截开关（true 拦截 / false 放行）', '信用风控');
+
+INSERT IGNORE INTO sys_table_registry(table_name, cn_name, module, sub_module, sort_no) VALUES
+('sys_config','系统参数','系统维护','参数配置',935);
+
 -- ── 销售提成（v5.26）：按目标达成率阶梯计提，审批后联动工资表 ──
 CREATE TABLE IF NOT EXISTS hr_sales_commission (
   id BIGINT AUTO_INCREMENT PRIMARY KEY,

@@ -48,6 +48,7 @@ const ForecastPage = lazy(() => import('./ForecastPage'));
 const Customer360Page = lazy(() => import('./Customer360Page'));
 const ProductionSchedulePage = lazy(() => import('./ProductionSchedulePage'));
 const BudgetDashboardPage = lazy(() => import('./BudgetDashboardPage'));
+const SysConfigPage = lazy(() => import('./SysConfigPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -57,7 +58,7 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' } | { type: 'scorecard' } | { type: 'workbench' } | { type: 'collection' } | { type: 'wocost' } | { type: 'forecast' } | { type: 'customer360'; code?: string } | { type: 'schedule' } | { type: 'budget' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' } | { type: 'scorecard' } | { type: 'workbench' } | { type: 'collection' } | { type: 'wocost' } | { type: 'forecast' } | { type: 'customer360'; code?: string } | { type: 'schedule' } | { type: 'budget' } | { type: 'sysconfig' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
@@ -90,6 +91,7 @@ const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[]
   { type: 'mrp',            label: 'MRP运算',      icon: '🧮', roles: ['admin','production'] },
   { type: 'ops',            label: '库存直调&期末', icon: '🛠️', roles: ['admin','warehouse','accounting'] },
   { type: 'audit',          label: '审计日志',     icon: '🕵️', roles: ['admin'] },
+  { type: 'sysconfig',      label: '系统参数中心', icon: '⚙️', roles: ['admin'] },
 ];
 
 export default function Layout() {
@@ -156,6 +158,7 @@ export default function Layout() {
     { label: '毛利分析', icon: '💹', page: { type: 'profit' } },
     { label: '数据字典', icon: '📖', page: { type: 'dicts' } },
     { label: '操作回收站', icon: '🗑️', page: { type: 'recycle' } },
+    { label: '系统参数中心', icon: '⚙️', page: { type: 'sysconfig' } },
   ];
   const gResults = useMemo(() => {
     const q = gq.trim().toLowerCase();
@@ -509,6 +512,7 @@ export default function Layout() {
         {page.type === 'customer360' && <Customer360Page initialCode={page.code || ''} />}
         {page.type === 'schedule' && <ProductionSchedulePage />}
         {page.type === 'budget' && <BudgetDashboardPage />}
+        {page.type === 'sysconfig' && <SysConfigPage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}

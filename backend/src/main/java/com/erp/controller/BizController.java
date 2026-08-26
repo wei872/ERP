@@ -1088,6 +1088,20 @@ public class BizController {
         try { return new java.math.BigDecimal(v.toString()); } catch (Exception e) { return java.math.BigDecimal.ZERO; }
     }
 
+    private java.math.BigDecimal bdNum(String v) {
+        try { return new java.math.BigDecimal(v); } catch (Exception e) { return java.math.BigDecimal.ZERO; }
+    }
+
+    /** 系统参数读取（v5.31）：sys_config 缺行/缺表时回退默认值 */
+    private String cfgVal(String key, String def) {
+        try {
+            List<Map<String,Object>> rows = db.queryForList("SELECT config_value FROM sys_config WHERE config_key=?", key);
+            if (rows.isEmpty() || rows.get(0).get("config_value") == null) return def;
+            String v = String.valueOf(rows.get(0).get("config_value")).trim();
+            return v.isEmpty() ? def : v;
+        } catch (Exception e) { return def; }
+    }
+
     // ── 合同执行跟踪（v5.27）：合同 ↔ 订单 ↔ 收付款 三单关联 + 到期预警 ──
     @GetMapping("/contract-tracking") public Result contractTracking() {
         try {
@@ -1591,8 +1605,8 @@ public class BizController {
     // ── 工单成本分析（v5.29）：领料实际成本 + 人工/制费标准费率 → 工单损益 ──
     @GetMapping("/workorder-cost") public Result workorderCost() {
         try {
-            final java.math.BigDecimal LABOR_RATE = new java.math.BigDecimal("15");   // 人工费标准费率（元/件）
-            final java.math.BigDecimal OVERHEAD_RATE = new java.math.BigDecimal("8"); // 制造费用标准费率（元/件）
+            final java.math.BigDecimal LABOR_RATE = bdNum(cfgVal("labor_rate", "15"));   // 人工费标准费率（元/件，系统参数可调）
+            final java.math.BigDecimal OVERHEAD_RATE = bdNum(cfgVal("overhead_rate", "8")); // 制造费用标准费率（元/件，系统参数可调）
             // 物料成本单价：库存加权均价，缺失回退商品采购价
             Map<String, java.math.BigDecimal> costMap = new LinkedHashMap<>();
             for (Map<String,Object> r : db.queryForList("SELECT product_code, AVG(unit_cost) c FROM trade_inventory_balance WHERE unit_cost>0 GROUP BY product_code"))
@@ -1839,6 +1853,78 @@ public class BizController {
             audit.log(user(req), "预算", "编制预算", dept + " " + m + " ¥" + amt, audit.getIp(req));
             return Result.ok("预算已保存");
         } catch (Exception e) { return Result.error("预算编制失败: " + e.getMessage()); }
+    }
+
+    // ── 系统参数配置中心（v5.31）──
+    @GetMapping("/config/list") public Result configList(HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        try {
+            return Result.ok(db.queryForList("SELECT * FROM sys_config ORDER BY group_name, config_key"));
+        } catch (Exception e) { return Result.error("参数加载失败: " + e.getMessage()); }
+    }
+
+    @PostMapping("/config/set") public Result configSet(@RequestBody Map<String,Object> body, HttpServletRequest req) {
+        if (!"admin".equals(role(req))) return Result.error("权限不足");
+        try {
+            String key = String.valueOf(body.getOrDefault("config_key", "")).trim();
+            String value = String.valueOf(body.getOrDefault("config_value", "")).trim();
+            if (key.isEmpty() || !key.matches("^[a-z][a-z0-9_]{1,58}$")) return Result.error("参数键无效");
+            List<Map<String,Object>> exists = db.queryForList("SELECT description FROM sys_config WHERE config_key=?", key);
+            if (exists.isEmpty()) return Result.error("参数不存在：" + key + "（仅允许修改已注册参数，防止脏参数污染计算）");
+            // 数值型参数校验（描述中含「元/件」「占比」「%」的视为数值）
+            String desc = String.valueOf(exists.get(0).getOrDefault("description", ""));
+            if (desc.contains("元/件") || desc.contains("占比") || desc.contains("%")) {
+                try { Double.parseDouble(value); } catch (Exception e) { return Result.error("该参数须为数值：" + key); }
+            }
+            if ("credit_block_enabled".equals(key) && !"true".equals(value) && !"false".equals(value)) return Result.error("开关参数仅允许 true / false");
+            db.update("UPDATE sys_config SET config_value=? WHERE config_key=?", value, key);
+            audit.log(user(req), "参数", "修改参数", key + " = " + value, audit.getIp(req));
+            return Result.ok("参数已保存，相关计算即时生效");
+        } catch (Exception e) { return Result.error("参数保存失败: " + e.getMessage()); }
+    }
+
+    // ── 供应商交付绩效明细（v5.31）：记分卡行展开的历史交付数据 ──
+    @GetMapping("/supplier-delivery/{code}") public Result supplierDelivery(@PathVariable String code) {
+        try {
+            List<Map<String,Object>> orders = db.queryForList(
+                "SELECT purchase_no, purchase_date, total_amount, purchase_status, arrival_status, buyer " +
+                "FROM trade_purchase_main WHERE supplier_code=? ORDER BY purchase_date DESC LIMIT 50", code);
+            long total = orders.size(), full = 0, inTransit = 0;
+            java.math.BigDecimal amount = java.math.BigDecimal.ZERO;
+            Map<String, java.math.BigDecimal> monthly = new LinkedHashMap<>();
+            for (Map<String,Object> o : orders) {
+                amount = amount.add(bd(o.get("total_amount")));
+                String arr = String.valueOf(o.getOrDefault("arrival_status", ""));
+                if ("全部到货".equals(arr)) full++;
+                else if ("未到货".equals(arr) || "部分到货".equals(arr)) inTransit++;
+                String m = String.valueOf(o.get("purchase_date"));
+                if (m.length() >= 7) {
+                    String key = m.substring(0, 7);
+                    monthly.merge(key, bd(o.get("total_amount")), java.math.BigDecimal::add);
+                }
+            }
+            Map<String,Object> stats = new LinkedHashMap<>();
+            stats.put("order_count", total);
+            stats.put("amount", amount);
+            stats.put("full_arrival", full);
+            stats.put("in_transit", inTransit);
+            stats.put("full_rate", total > 0 ? new java.math.BigDecimal(full).multiply(new java.math.BigDecimal("100")).divide(new java.math.BigDecimal(total), 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+            stats.put("avg_amount", total > 0 ? amount.divide(new java.math.BigDecimal(total), 2, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+            List<Map<String,Object>> trend = new ArrayList<>();
+            List<String> months = new ArrayList<>(monthly.keySet());
+            java.util.Collections.sort(months);
+            if (months.size() > 6) months = months.subList(months.size() - 6, months.size());
+            for (String m : months) {
+                Map<String,Object> t = new LinkedHashMap<>();
+                t.put("month", m); t.put("amount", monthly.get(m));
+                trend.add(t);
+            }
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("stats", stats);
+            ret.put("trend", trend);
+            ret.put("orders", orders);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("交付明细加载失败: " + e.getMessage()); }
     }
 
     // ── 回收站恢复 ──
@@ -2270,8 +2356,10 @@ public class BizController {
                 for (String m : months) trend.add(byMonth.get(m));
             } catch (Exception ignored) {}
             ret.put("trend", trend);
-            // ABC 分析（v5.30）：按库存金额降序累计占比 → A(≤70%)/B(≤90%)/C
+            // ABC 分析（v5.30）：按库存金额降序累计占比 → A(≤a阈值)/B(≤b阈值)/C，阈值取系统参数（v5.31）
             try {
+                double abcA = Double.parseDouble(cfgVal("abc_a_threshold", "70"));
+                double abcB = Double.parseDouble(cfgVal("abc_b_threshold", "90"));
                 List<Map<String,Object>> items = db.queryForList(
                     "SELECT product_code, MAX(product_name) product_name, SUM(qty) qty, SUM(total_value) value " +
                     "FROM trade_inventory_balance WHERE total_value>0 GROUP BY product_code ORDER BY value DESC LIMIT 500");
@@ -2285,7 +2373,7 @@ public class BizController {
                     java.math.BigDecimal val = bd(it.get("value"));
                     cum = cum.add(val);
                     double pct = totalValue.signum() > 0 ? cum.divide(totalValue, 4, java.math.RoundingMode.HALF_UP).doubleValue() * 100 : 100;
-                    String cls = pct <= 70 ? "A" : pct <= 90 ? "B" : "C";
+                    String cls = pct <= abcA ? "A" : pct <= abcB ? "B" : "C";
                     if ("A".equals(cls)) { aCnt++; aVal = aVal.add(val); }
                     else if ("B".equals(cls)) { bCnt++; bVal = bVal.add(val); }
                     else { cCnt++; cVal = cVal.add(val); }

@@ -63,6 +63,11 @@ public class CreditService {
     public String check(String customerCode, BigDecimal orderAmt) {
         if (customerCode == null || customerCode.trim().isEmpty()) return null;
         if (orderAmt == null || orderAmt.signum() <= 0) return null;
+        // 系统参数开关（v5.31）：credit_block_enabled=false 时全局放行（应急逃生门，留痕依赖审计）
+        try {
+            java.util.List<Map<String,Object>> cfg = db.queryForList("SELECT config_value FROM sys_config WHERE config_key='credit_block_enabled'");
+            if (!cfg.isEmpty() && "false".equalsIgnoreCase(String.valueOf(cfg.get(0).get("config_value")).trim())) return null;
+        } catch (Exception ignored) {}
         List<Map<String,Object>> cs = db.queryForList(
             "SELECT customer_name, credit_limit FROM cust_customer_main WHERE customer_code=?", customerCode);
         if (cs.isEmpty()) return null;

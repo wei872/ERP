@@ -82,28 +82,43 @@ export default function ProfitPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* 产品毛利排行 */}
+        {/* 产品利润排行榜（v5.31）：名次 + 贡献度 + 帕累托累计 */}
         <div className="erp-card p-6">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4">📦 产品毛利排行</h3>
-          {byProduct.length === 0 ? <p className="text-center text-sm text-slate-400 py-8">暂无数据</p> : (
-            <div className="space-y-3">
-              {byProduct.map((p: any) => (
-                <div key={p.product_code}>
-                  <div className="flex items-center justify-between text-xs mb-1">
-                    <span className="font-medium text-slate-700 truncate max-w-[55%]">{p.product_name} <span className="font-mono text-slate-400">{p.product_code}</span></span>
-                    <span className="flex items-center gap-2 tabular-nums">
-                      <span className="text-slate-500">¥{money(p.revenue)}</span>
-                      <span className="font-semibold text-emerald-600">毛利 ¥{money(p.profit)}</span>
-                      <RateBadge v={p.rate} />
-                    </span>
-                  </div>
-                  <div className="h-2 bg-slate-50 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-violet-500" style={{ width: `${Math.max(2, ((Number(p.profit) || 0) / maxProfit) * 100)}%` }}></div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <h3 className="text-sm font-semibold text-slate-700 mb-1">🏆 产品利润排行榜</h3>
+          <p className="text-[10px] text-slate-400 mb-4">按毛利额排名 · 贡献度 = 单品毛利 ÷ 总毛利 · 累计达 80% 即为核心利润产品</p>
+          {byProduct.length === 0 ? <p className="text-center text-sm text-slate-400 py-8">暂无数据</p> : (() => {
+            const ranked = [...byProduct].sort((a: any, b: any) => (Number(b.profit) || 0) - (Number(a.profit) || 0));
+            const totalProfit = ranked.reduce((s: number, p: any) => s + Math.max(0, Number(p.profit) || 0), 0);
+            let cum = 0;
+            return (
+              <div className="space-y-3">
+                {ranked.map((p: any, i: number) => {
+                  const profit = Number(p.profit) || 0;
+                  const contrib = totalProfit > 0 ? (Math.max(0, profit) / totalProfit) * 100 : 0;
+                  cum += contrib;
+                  return (
+                    <div key={p.product_code}>
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-medium text-slate-700 truncate max-w-[58%] flex items-center gap-1.5">
+                          <span className="shrink-0">{i < 3 ? ['🥇', '🥈', '🥉'][i] : <span className="inline-block w-5 text-center text-slate-400 tabular-nums">{i + 1}</span>}</span>
+                          <span className="truncate">{p.product_name}</span> <span className="font-mono text-slate-400">{p.product_code}</span>
+                        </span>
+                        <span className="flex items-center gap-2 tabular-nums shrink-0">
+                          <span className="font-semibold text-emerald-600">¥{money(p.profit)}</span>
+                          <span className="text-violet-600 font-bold">{contrib.toFixed(1)}%</span>
+                          <RateBadge v={p.rate} />
+                        </span>
+                      </div>
+                      <div className="h-2 bg-slate-50 rounded-full overflow-hidden relative">
+                        <div className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-violet-500" style={{ width: `${Math.max(2, ((Number(p.profit) || 0) / maxProfit) * 100)}%` }}></div>
+                      </div>
+                      {cum >= 80 && (() => { const prevCum = cum - contrib; return prevCum < 80 ? <p className="text-[9px] text-violet-500 font-medium mt-0.5">— 以上产品累计贡献 {cum.toFixed(1)}%，已达 80% 核心利润线 —</p> : null; })()}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
         </div>
 
         {/* 客户毛利明细 */}
