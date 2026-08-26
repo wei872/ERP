@@ -49,6 +49,8 @@ const Customer360Page = lazy(() => import('./Customer360Page'));
 const ProductionSchedulePage = lazy(() => import('./ProductionSchedulePage'));
 const BudgetDashboardPage = lazy(() => import('./BudgetDashboardPage'));
 const SysConfigPage = lazy(() => import('./SysConfigPage'));
+const ApprovalEfficiencyPage = lazy(() => import('./ApprovalEfficiencyPage'));
+const MonthlyReportPage = lazy(() => import('./MonthlyReportPage'));
 
 function PageFallback() {
   return <div className="flex items-center justify-center h-64 text-sm text-slate-400"><span className="animate-pulse">页面加载中…</span></div>;
@@ -58,11 +60,13 @@ type Page =
   | { type: 'dashboard' } | { type: 'report' } | { type: 'users' } | { type: 'finance' } | { type: 'rbac' }
   | { type: 'table'; tableKey: string; search?: string }
   | { type: 'workflow' } | { type: 'voucher' } | { type: 'statements' }
-  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' } | { type: 'scorecard' } | { type: 'workbench' } | { type: 'collection' } | { type: 'wocost' } | { type: 'forecast' } | { type: 'customer360'; code?: string } | { type: 'schedule' } | { type: 'budget' } | { type: 'sysconfig' };
+  | { type: 'production' } | { type: 'mrp' } | { type: 'ops' } | { type: 'reconciliation' } | { type: 'audit' } | { type: 'profit' } | { type: 'daily' } | { type: 'dicts' } | { type: 'recycle' } | { type: 'mapproval' } | { type: 'tracking' } | { type: 'import' } | { type: 'monitor' } | { type: 'ptracking' } | { type: 'invanalysis' } | { type: 'prodtracking' } | { type: 'auditsearch' } | { type: 'messages' } | { type: 'reportsub' } | { type: 'norule' } | { type: 'stocktakeanalysis' } | { type: 'pricecompare' } | { type: 'commission' } | { type: 'contracttrack' } | { type: 'ncr' } | { type: 'scorecard' } | { type: 'workbench' } | { type: 'collection' } | { type: 'wocost' } | { type: 'forecast' } | { type: 'customer360'; code?: string } | { type: 'schedule' } | { type: 'budget' } | { type: 'sysconfig' } | { type: 'approvaleff' } | { type: 'monthlyreport' };
 
 const BIZ_PAGES: Array<{ type: any; label: string; icon: string; roles: string[] }> = [
   { type: 'daily',          label: '经营日报',     icon: '📰', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'workflow',       label: '工作流审批',   icon: '🔁', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
+  { type: 'approvaleff',    label: '审批时效报表', icon: '⏱️', roles: ['admin','hr'] },
+  { type: 'monthlyreport',  label: '经营月报',     icon: '🗓️', roles: ['admin','sales','accounting'] },
   { type: 'mapproval',      label: '移动审批',     icon: '📱', roles: ['admin','sales','warehouse','accounting','production','hr','procurement','aftersale'] },
   { type: 'tracking',       label: '销售执行跟踪', icon: '🚚', roles: ['admin','sales','accounting'] },
   { type: 'contracttrack',  label: '合同执行跟踪', icon: '📑', roles: ['admin','sales','procurement','accounting'] },
@@ -159,6 +163,8 @@ export default function Layout() {
     { label: '数据字典', icon: '📖', page: { type: 'dicts' } },
     { label: '操作回收站', icon: '🗑️', page: { type: 'recycle' } },
     { label: '系统参数中心', icon: '⚙️', page: { type: 'sysconfig' } },
+    { label: '审批时效报表', icon: '⏱️', page: { type: 'approvaleff' } },
+    { label: '经营月报', icon: '🗓️', page: { type: 'monthlyreport' } },
   ];
   const gResults = useMemo(() => {
     const q = gq.trim().toLowerCase();
@@ -513,6 +519,8 @@ export default function Layout() {
         {page.type === 'schedule' && <ProductionSchedulePage />}
         {page.type === 'budget' && <BudgetDashboardPage />}
         {page.type === 'sysconfig' && <SysConfigPage />}
+        {page.type === 'approvaleff' && <ApprovalEfficiencyPage />}
+        {page.type === 'monthlyreport' && <MonthlyReportPage />}
         {page.type === 'import' && <DataImportPage />}
         {page.type === 'monitor' && <SystemMonitorPage />}
         {page.type === 'table' && page.tableKey === 'fin_template' && <FinanceTemplate />}

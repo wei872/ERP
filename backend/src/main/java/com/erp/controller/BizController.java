@@ -398,6 +398,10 @@ public class BizController {
             try {
                 ret.put("overduePlans", db.queryForObject("SELECT COUNT(*) FROM cust_contract_payment_plan WHERE due_date<CURDATE() AND status NOT IN ('已收款')", Long.class));
             } catch (Exception ignored) {}
+            // 审批超时提醒（v5.32）：创建超 48 小时仍未处理的任务
+            try {
+                ret.put("approvalOverdue", db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理' AND create_date <= DATE_SUB(CURDATE(), INTERVAL 2 DAY)", Long.class));
+            } catch (Exception ignored) {}
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("待办加载失败: " + e.getMessage()); }
     }
@@ -1736,6 +1740,46 @@ public class BizController {
             catch (Exception e) { ret.put("contracts", new ArrayList<>()); }
             try { ret.put("collections", db.queryForList("SELECT method, result, content, collector, collect_date, next_follow_date FROM finance_collection_record WHERE customer_code=? ORDER BY id DESC LIMIT 20", code)); }
             catch (Exception e) { ret.put("collections", new ArrayList<>()); }
+            // 复购分析（v5.32）：复购率 / 平均购买间隔 / 近6月采购趋势
+            try {
+                List<java.time.LocalDate> dates = new ArrayList<>();
+                java.math.BigDecimal repurchaseAmt = java.math.BigDecimal.ZERO;
+                List<Map<String,Object>> allOrders = db.queryForList("SELECT sales_date, total_amount FROM trade_sales_main WHERE customer_code=? ORDER BY sales_date ASC", code);
+                java.time.LocalDate prev = null;
+                long intervals = 0; long intervalSum = 0;
+                boolean first = true;
+                for (Map<String,Object> o : allOrders) {
+                    try {
+                        java.time.LocalDate d = java.time.LocalDate.parse(String.valueOf(o.get("sales_date")).substring(0, 10));
+                        dates.add(d);
+                        if (prev != null) { intervals++; intervalSum += java.time.temporal.ChronoUnit.DAYS.between(prev, d); }
+                        if (first) first = false; else repurchaseAmt = repurchaseAmt.add(bd(o.get("total_amount")));
+                        prev = d;
+                    } catch (Exception ignored) {}
+                }
+                Map<String,Object> rp = new LinkedHashMap<>();
+                rp.put("order_count", allOrders.size());
+                rp.put("is_repeat", allOrders.size() >= 2);
+                rp.put("avg_interval_days", intervals > 0 ? new java.math.BigDecimal(intervalSum).divide(new java.math.BigDecimal(intervals), 1, java.math.RoundingMode.HALF_UP) : java.math.BigDecimal.ZERO);
+                rp.put("repurchase_amount", repurchaseAmt);
+                // 近 6 月金额趋势
+                Map<String, java.math.BigDecimal> monthly = new LinkedHashMap<>();
+                for (Map<String,Object> o : allOrders) {
+                    String dstr = String.valueOf(o.get("sales_date"));
+                    if (dstr.length() >= 7) monthly.merge(dstr.substring(0, 7), bd(o.get("total_amount")), java.math.BigDecimal::add);
+                }
+                List<Map<String,Object>> trend = new ArrayList<>();
+                List<String> months = new ArrayList<>(monthly.keySet());
+                java.util.Collections.sort(months);
+                if (months.size() > 6) months = months.subList(months.size() - 6, months.size());
+                for (String mm : months) {
+                    Map<String,Object> t = new LinkedHashMap<>();
+                    t.put("month", mm); t.put("amount", monthly.get(mm));
+                    trend.add(t);
+                }
+                rp.put("trend", trend);
+                ret.put("repurchase", rp);
+            } catch (Exception e) { ret.put("repurchase", null); }
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("客户 360 加载失败: " + e.getMessage()); }
     }
@@ -1925,6 +1969,112 @@ public class BizController {
             ret.put("orders", orders);
             return Result.ok(ret);
         } catch (Exception e) { return Result.error("交付明细加载失败: " + e.getMessage()); }
+    }
+
+    // ── 库龄分析（v5.32）：批次持有天数分桶 + 高龄批次清单 ──
+    @GetMapping("/inventory-aging") public Result inventoryAging() {
+        try {
+            List<Map<String,Object>> batches = db.queryForList(
+                "SELECT batch_no, product_code, product_name, remain_qty, unit_cost, in_date, status, " +
+                "DATEDIFF(CURDATE(), in_date) age_days FROM trade_batch_trace WHERE remain_qty>0 ORDER BY age_days DESC LIMIT 800");
+            long c30 = 0, c90 = 0, c180 = 0, c180p = 0;
+            java.math.BigDecimal a30 = java.math.BigDecimal.ZERO, a90 = java.math.BigDecimal.ZERO, a180 = java.math.BigDecimal.ZERO, a180p = java.math.BigDecimal.ZERO;
+            List<Map<String,Object>> old = new ArrayList<>();
+            for (Map<String,Object> b : batches) {
+                long days = ((Number) b.get("age_days")).longValue();
+                java.math.BigDecimal amt = bd(b.get("remain_qty")).multiply(bd(b.get("unit_cost"))).setScale(2, java.math.RoundingMode.HALF_UP);
+                if (days <= 30) { c30++; a30 = a30.add(amt); }
+                else if (days <= 90) { c90++; a90 = a90.add(amt); }
+                else if (days <= 180) { c180++; a180 = a180.add(amt); }
+                else { c180p++; a180p = a180p.add(amt); }
+                if (days > 90 && old.size() < 10) old.add(b);
+            }
+            List<Map<String,Object>> buckets = new ArrayList<>();
+            String[] names = { "≤30天", "31-90天", "91-180天", ">180天" };
+            long[] cnts = { c30, c90, c180, c180p };
+            java.math.BigDecimal[] amts = { a30, a90, a180, a180p };
+            for (int i = 0; i < 4; i++) {
+                Map<String,Object> bk = new LinkedHashMap<>();
+                bk.put("bucket", names[i]); bk.put("count", cnts[i]); bk.put("amount", amts[i]);
+                buckets.add(bk);
+            }
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("buckets", buckets);
+            ret.put("risk_amount", a180.add(a180p));
+            ret.put("total_amount", a30.add(a90).add(a180).add(a180p));
+            ret.put("old_batches", old);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("库龄分析加载失败: " + e.getMessage()); }
+    }
+
+    // ── 审批时效报表（v5.32）：节点耗时统计 + 超 48 小时未处理标红 ──
+    @GetMapping("/approval-efficiency") public Result approvalEfficiency() {
+        try {
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("pending", db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理'", Long.class));
+            ret.put("pending_overdue", db.queryForObject("SELECT COUNT(*) FROM oa_flow_task WHERE task_status='待处理' AND create_date <= DATE_SUB(CURDATE(), INTERVAL 2 DAY)", Long.class));
+            java.math.BigDecimal avgDays = db.queryForObject(
+                "SELECT COALESCE(AVG(DATEDIFF(complete_date, create_date)),0) FROM oa_flow_task WHERE task_status IN ('已通过','已驳回') AND complete_date IS NOT NULL AND complete_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)",
+                java.math.BigDecimal.class);
+            ret.put("avg_days_90d", avgDays == null ? java.math.BigDecimal.ZERO : avgDays.setScale(1, java.math.RoundingMode.HALF_UP));
+            ret.put("byTask", db.queryForList(
+                "SELECT task_name, COUNT(*) total, SUM(CASE WHEN task_status='待处理' THEN 1 ELSE 0 END) pending, " +
+                "SUM(CASE WHEN task_status='待处理' AND create_date <= DATE_SUB(CURDATE(), INTERVAL 2 DAY) THEN 1 ELSE 0 END) overdue, " +
+                "COALESCE(AVG(CASE WHEN complete_date IS NOT NULL THEN DATEDIFF(complete_date, create_date) END),0) avg_days " +
+                "FROM oa_flow_task GROUP BY task_name ORDER BY overdue DESC, pending DESC LIMIT 20"));
+            ret.put("overdueList", db.queryForList(
+                "SELECT t.task_no, t.instance_no, t.task_name, t.assignee, t.create_date, DATEDIFF(CURDATE(), t.create_date) waiting_days, " +
+                "i.applicant FROM oa_flow_task t LEFT JOIN oa_flow_instance i ON i.instance_no=t.instance_no " +
+                "WHERE t.task_status='待处理' AND t.create_date <= DATE_SUB(CURDATE(), INTERVAL 2 DAY) ORDER BY waiting_days DESC LIMIT 20"));
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("审批时效加载失败: " + e.getMessage()); }
+    }
+
+    // ── 经营月报（v5.32）：销售/采购/库存/财务/质量五板块月度综合 ──
+    @GetMapping("/monthly-report") public Result monthlyReport(@RequestParam(required = false, defaultValue = "") String month) {
+        try {
+            String m = month.trim().isEmpty() ? db.queryForObject("SELECT DATE_FORMAT(CURDATE(),'%Y-%m')", String.class) : month.trim();
+            if (!m.matches("\\d{4}-\\d{2}")) return Result.error("月份格式须为 yyyy-MM");
+            Map<String,Object> ret = new LinkedHashMap<>();
+            ret.put("month", m);
+            // 销售
+            Map<String,Object> sales = new LinkedHashMap<>();
+            Map<String,Object> s = db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(total_amount),0) amt FROM trade_sales_main WHERE DATE_FORMAT(sales_date,'%Y-%m')=?", m).get(0);
+            sales.put("count", s.get("cnt")); sales.put("amount", bd(s.get("amt")));
+            sales.put("topProduct", db.queryForList(
+                "SELECT d.product_code, MAX(d.product_name) product_name, COALESCE(SUM(d.amount),0) amt FROM trade_sales_detail d " +
+                "JOIN trade_sales_main s ON s.sales_no=d.sales_no WHERE DATE_FORMAT(s.sales_date,'%Y-%m')=? GROUP BY d.product_code ORDER BY amt DESC LIMIT 5", m));
+            ret.put("sales", sales);
+            // 采购
+            Map<String,Object> pur = new LinkedHashMap<>();
+            Map<String,Object> p = db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(total_amount),0) amt FROM trade_purchase_main WHERE DATE_FORMAT(purchase_date,'%Y-%m')=?", m).get(0);
+            pur.put("count", p.get("cnt")); pur.put("amount", bd(p.get("amt")));
+            ret.put("purchase", pur);
+            // 库存
+            Map<String,Object> inv = new LinkedHashMap<>();
+            try { inv.put("value", db.queryForObject("SELECT COALESCE(SUM(total_value),0) FROM trade_inventory_balance", java.math.BigDecimal.class)); } catch (Exception e) { inv.put("value", java.math.BigDecimal.ZERO); }
+            try { inv.put("in_amount", bd(db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_stock_in_main WHERE DATE_FORMAT(in_date,'%Y-%m')=?", java.math.BigDecimal.class, m))); } catch (Exception e) { inv.put("in_amount", java.math.BigDecimal.ZERO); }
+            try { inv.put("out_amount", bd(db.queryForObject("SELECT COALESCE(SUM(total_amount),0) FROM trade_stock_out_main WHERE DATE_FORMAT(out_date,'%Y-%m')=?", java.math.BigDecimal.class, m))); } catch (Exception e) { inv.put("out_amount", java.math.BigDecimal.ZERO); }
+            ret.put("inventory", inv);
+            // 财务
+            Map<String,Object> fin = new LinkedHashMap<>();
+            fin.put("vouchers", db.queryForObject("SELECT COUNT(*) FROM voucher_main WHERE period=?", Long.class, m));
+            try { fin.put("receivable_remain", bd(db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main", java.math.BigDecimal.class))); } catch (Exception e) { fin.put("receivable_remain", java.math.BigDecimal.ZERO); }
+            try { fin.put("payable_remain", bd(db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_payable_main", java.math.BigDecimal.class))); } catch (Exception e) { fin.put("payable_remain", java.math.BigDecimal.ZERO); }
+            try { fin.put("expense", bd(db.queryForObject("SELECT COALESCE(SUM(amount),0) FROM oa_approval_main WHERE approval_type='费用审批' AND approval_status IN ('待审批','已通过') AND DATE_FORMAT(submit_date,'%Y-%m')=?", java.math.BigDecimal.class, m))); } catch (Exception e) { fin.put("expense", java.math.BigDecimal.ZERO); }
+            ret.put("finance", fin);
+            // 质量
+            Map<String,Object> qua = new LinkedHashMap<>();
+            try { qua.put("ncr_count", db.queryForObject("SELECT COUNT(*) FROM quality_ncr WHERE DATE_FORMAT(report_date,'%Y-%m')=?", Long.class, m)); } catch (Exception e) { qua.put("ncr_count", 0L); }
+            try { qua.put("scrap_qty", bd(db.queryForObject("SELECT COALESCE(SUM(scrap_qty),0) FROM prod_scrap_main WHERE DATE_FORMAT(scrap_date,'%Y-%m')=?", java.math.BigDecimal.class, m))); } catch (Exception e) { qua.put("scrap_qty", java.math.BigDecimal.ZERO); }
+            try {
+                Map<String,Object> qc = db.queryForList("SELECT COALESCE(SUM(sample_qty),0) s, COALESCE(SUM(pass_qty),0) p FROM quality_inspection_main WHERE DATE_FORMAT(inspection_date,'%Y-%m')=?", m).get(0);
+                long ss = ((Number) qc.get("s")).longValue(), pp = ((Number) qc.get("p")).longValue();
+                qua.put("pass_rate", ss > 0 ? new java.math.BigDecimal(pp).multiply(new java.math.BigDecimal("100")).divide(new java.math.BigDecimal(ss), 1, java.math.RoundingMode.HALF_UP) : new java.math.BigDecimal("100.0"));
+            } catch (Exception e) { qua.put("pass_rate", new java.math.BigDecimal("100.0")); }
+            ret.put("quality", qua);
+            return Result.ok(ret);
+        } catch (Exception e) { return Result.error("经营月报加载失败: " + e.getMessage()); }
     }
 
     // ── 回收站恢复 ──

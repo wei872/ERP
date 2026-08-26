@@ -3,7 +3,7 @@ import { bizApi } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { toastNotify } from '../utils/toast';
 
-const TYPE_LABELS: Record<string, string> = { daily: '经营日报', weekly: '经营周报', finance: '财务报表（月度）', stocktake: '盘点盈亏分析', workorder: '工单成本报告', aging: '应收账龄报告' };
+const TYPE_LABELS: Record<string, string> = { daily: '经营日报', weekly: '经营周报', finance: '财务报表（月度）', stocktake: '盘点盈亏分析', workorder: '工单成本报告', aging: '应收账龄报告', monthly: '经营月报' };
 const STATUS_CLS: Record<string, string> = {
   pending: 'bg-slate-100 text-slate-500', sent: 'bg-emerald-50 text-emerald-600',
   simulated: 'bg-blue-50 text-blue-600', failed: 'bg-red-50 text-red-500',
@@ -61,6 +61,7 @@ export default function ReportSubscriptionPage() {
               <option value="stocktake">盘点盈亏分析</option>
               <option value="workorder">工单成本报告</option>
               <option value="aging">应收账龄报告</option>
+              <option value="monthly">经营月报</option>
             </select>
           </div>
           <div>

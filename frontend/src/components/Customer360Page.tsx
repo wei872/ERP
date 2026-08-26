@@ -91,6 +91,44 @@ export default function Customer360Page({ initialCode = '' }: { initialCode?: st
             </div>
           </div>
 
+          {/* 复购分析（v5.32） */}
+          {data.repurchase && (
+            <div className="erp-card p-4 md:p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-slate-700">🔁 复购分析</h3>
+                <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${data.repurchase.is_repeat ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-500'}`}>
+                  {data.repurchase.is_repeat ? '✓ 复购客户' : '首购客户（尚无复购）'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-[10px] text-slate-400 mb-0.5">累计订单 / 复购金额</p>
+                  <p className="text-base font-bold tabular-nums text-slate-800">{Number(data.repurchase.order_count || 0)} 单 · ¥{money(data.repurchase.repurchase_amount)}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">复购金额 = 首单之后的订单合计</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-[10px] text-slate-400 mb-0.5">平均购买间隔</p>
+                  <p className="text-base font-bold tabular-nums text-slate-800">{data.repurchase.is_repeat ? `${Number(data.repurchase.avg_interval_days || 0).toFixed(0)} 天` : '—'}</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{data.repurchase.is_repeat && Number(data.repurchase.avg_interval_days) > 0 && Number(data.repurchase.avg_interval_days) < 45 ? '高频复购，重点维护' : data.repurchase.is_repeat ? '可提前触达促复购' : '积累订单后自动计算'}</p>
+                </div>
+                <div className="rounded-xl bg-slate-50 p-3">
+                  <p className="text-[10px] text-slate-400 mb-1">近 6 月下单金额</p>
+                  {(data.repurchase.trend || []).length === 0 ? <p className="text-xs text-slate-400 py-2">暂无数据</p> : (
+                    <div className="flex items-end gap-1.5 h-12">
+                      {(data.repurchase.trend || []).map((t: any) => {
+                        const max = Math.max(...(data.repurchase.trend || []).map((x: any) => Number(x.amount) || 0), 1);
+                        return <div key={t.month} className="flex-1 flex flex-col items-center gap-0.5" title={`${t.month}：¥${Number(t.amount).toLocaleString()}`}>
+                          <div className="w-full rounded-t bg-emerald-400/80" style={{ height: `${Math.max(4, (Number(t.amount) / max) * 32)}px` }}></div>
+                          <span className="text-[8px] text-slate-400">{String(t.month).slice(5)}</span>
+                        </div>;
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
             {/* 销售订单 */}
             <Sec title="🧾 销售订单（近 30 单）" count={(data.orders || []).length}>

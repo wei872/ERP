@@ -68,6 +68,9 @@ public class ReportMailService {
         } else if ("aging".equals(type)) {
             subject = appName + " 应收账龄报告（" + new SimpleDateFormat("yyyy-MM-dd").format(new Date()) + "）";
             body = buildAgingBody();
+        } else if ("monthly".equals(type)) {
+            subject = appName + " 经营月报（" + period + "）";
+            body = buildMonthlyBody(period);
         } else {
             subject = appName + " 经营日报（" + new SimpleDateFormat("yyyy-MM-dd").format(new Date()) + "）";
             body = buildDailyBody();
@@ -216,6 +219,41 @@ public class ReportMailService {
             sb.append("<p><b>工单数：").append(wos.size()).append(" · 总成本：").append(totCost).append("</b>（人工 ¥").append(labor).append("/件 + 制费 ¥").append(overhead).append("/件，费率见系统参数）</p>");
         } catch (Exception e) { sb.append("<p>工单数据暂不可用：").append(e.getMessage()).append("</p>"); }
         sb.append("</body></html>");
+        return sb.toString();
+    }
+
+    /** 经营月报正文（v5.32 订阅扩展）：销售/采购/库存/财务/质量五板块 */
+    private String buildMonthlyBody(String period) {
+        StringBuilder sb = new StringBuilder("<html><body style=\"font-family:sans-serif;\">");
+        sb.append("<h2>").append(appName).append(" 经营月报（").append(period).append("）</h2>");
+        sb.append("<p>生成时间：").append(new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date())).append("</p>");
+        sb.append("<table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">");
+        sb.append("<tr><th>板块</th><th>指标</th><th>数值</th></tr>");
+        try {
+            Map<String,Object> s = db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(total_amount),0) amt FROM trade_sales_main WHERE DATE_FORMAT(sales_date,'%Y-%m')=?", period).get(0);
+            sb.append("<tr><td rowspan=\"2\">销售</td><td>订单数</td><td>").append(s.get("cnt")).append("</td></tr>");
+            sb.append("<tr><td>销售额</td><td>").append(s.get("amt")).append("</td></tr>");
+        } catch (Exception e) { sb.append("<tr><td>销售</td><td colspan=\"2\">数据不可用</td></tr>"); }
+        try {
+            Map<String,Object> p = db.queryForList("SELECT COUNT(*) cnt, COALESCE(SUM(total_amount),0) amt FROM trade_purchase_main WHERE DATE_FORMAT(purchase_date,'%Y-%m')=?", period).get(0);
+            sb.append("<tr><td rowspan=\"2\">采购</td><td>订单数</td><td>").append(p.get("cnt")).append("</td></tr>");
+            sb.append("<tr><td>采购额</td><td>").append(p.get("amt")).append("</td></tr>");
+        } catch (Exception e) { sb.append("<tr><td>采购</td><td colspan=\"2\">数据不可用</td></tr>"); }
+        try {
+            Object inv = db.queryForObject("SELECT COALESCE(SUM(total_value),0) FROM trade_inventory_balance", java.math.BigDecimal.class);
+            sb.append("<tr><td>库存</td><td>当前库存金额</td><td>").append(inv).append("</td></tr>");
+        } catch (Exception e) { sb.append("<tr><td>库存</td><td colspan=\"2\">数据不可用</td></tr>"); }
+        try {
+            Object vz = db.queryForObject("SELECT COUNT(*) FROM voucher_main WHERE period=?", Long.class, period);
+            Object rcv = db.queryForObject("SELECT COALESCE(SUM(remain_amount),0) FROM finance_receivable_main", java.math.BigDecimal.class);
+            sb.append("<tr><td rowspan=\"2\">财务</td><td>当月凭证数</td><td>").append(vz).append("</td></tr>");
+            sb.append("<tr><td>应收未收余额</td><td>").append(rcv).append("</td></tr>");
+        } catch (Exception e) { sb.append("<tr><td>财务</td><td colspan=\"2\">数据不可用</td></tr>"); }
+        try {
+            Object ncr = db.queryForObject("SELECT COUNT(*) FROM quality_ncr WHERE DATE_FORMAT(report_date,'%Y-%m')=?", Long.class, period);
+            sb.append("<tr><td>质量</td><td>当月质量异常单</td><td>").append(ncr).append("</td></tr>");
+        } catch (Exception e) { sb.append("<tr><td>质量</td><td colspan=\"2\">数据不可用</td></tr>"); }
+        sb.append("</table><p>详细分析请登录系统查看「经营月报」页。</p></body></html>");
         return sb.toString();
     }
 

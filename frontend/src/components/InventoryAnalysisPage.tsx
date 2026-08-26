@@ -13,10 +13,12 @@ const money = (v: unknown) => {
 /** 库存周转分析：周转率 / 可销天数 / 呆滞料 / 出入库趋势 */
 export default function InventoryAnalysisPage() {
   const [data, setData] = useState<any>(null);
+  const [aging, setAging] = useState<any>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     bizApi.inventoryAnalysis().then(r => setData(r.data)).catch(e => setError(e.message || '加载失败'));
+    bizApi.inventoryAging().then(r => setAging(r.data)).catch(() => {});
   }, []);
 
   if (error) return <div className="p-16 text-center"><div className="text-5xl mb-3">⚠️</div><p className="text-red-500">{error}</p></div>;
@@ -139,6 +141,61 @@ export default function InventoryAnalysisPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {/* 库龄分析（v5.32）：批次持有天数分桶 + 高龄批次清单 */}
+      {aging && (
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2"><span className="w-1 h-4 rounded-full bg-gradient-to-b from-orange-500 to-red-500"></span>库龄分析（批次持有天数分桶，&gt;90 天联动呆滞风险标红）</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {(aging.buckets || []).map((b: any) => {
+                const risk = b.bucket === '91-180天' || b.bucket === '>180天';
+                return (
+                  <div key={b.bucket} className={`erp-card p-4 ${risk && Number(b.count) > 0 ? 'ring-1 ring-red-200' : ''}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-semibold text-slate-500">{b.bucket}</span>
+                      {risk && Number(b.count) > 0 && <span className="text-[10px] text-red-500 font-bold">⚠️ 呆滞风险</span>}
+                    </div>
+                    <p className={`text-xl font-bold tabular-nums ${risk && Number(b.count) > 0 ? 'text-red-500' : 'text-slate-800'}`}>{Number(b.count || 0)} <span className="text-xs font-normal text-slate-400">批次</span></p>
+                    <p className="text-[11px] text-slate-400 mt-0.5 tabular-nums">金额 ¥{money(b.amount)}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex flex-wrap gap-x-6 gap-y-1 mt-3 text-xs">
+              <span className="text-slate-500">在库批次总金额 <b className="tabular-nums text-slate-800">¥{money(aging.total_amount)}</b></span>
+              <span className="text-slate-500">呆滞风险金额（&gt;90天）<b className={`tabular-nums ${Number(aging.risk_amount) > 0 ? 'text-red-500' : 'text-emerald-600'}`}>¥{money(aging.risk_amount)}</b></span>
+            </div>
+          </div>
+
+          {(aging.old_batches || []).length > 0 && (
+            <div className="erp-card p-4 md:p-5 overflow-x-auto">
+              <h4 className="text-sm font-semibold text-slate-700 mb-3">🕰️ 高龄批次清单（&gt;90 天）</h4>
+              <table className="erp-table text-xs w-full min-w-[700px]">
+                <thead><tr><th className="text-left">批次号</th><th className="text-left">商品</th><th>入库日期</th><th>库龄</th><th>剩余数量</th><th>单位成本</th><th>占用金额</th><th>状态</th></tr></thead>
+                <tbody>
+                  {(aging.old_batches || []).map((b: any) => {
+                    const days = Number(b.age_days || 0);
+                    return (
+                      <tr key={b.batch_no} className={days > 180 ? 'bg-red-50/40' : 'bg-orange-50/30'}>
+                        <td className="text-left font-mono text-indigo-600 whitespace-nowrap">{b.batch_no}</td>
+                        <td className="text-left"><p className="font-medium text-slate-700 whitespace-nowrap">{b.product_name}</p><p className="font-mono text-[10px] text-slate-400">{b.product_code}</p></td>
+                        <td className="tabular-nums whitespace-nowrap">{String(b.in_date || '').slice(0, 10)}</td>
+                        <td><span className={`px-2 py-0.5 rounded-full text-[10px] font-bold whitespace-nowrap ${days > 180 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>{days} 天</span></td>
+                        <td className="tabular-nums">{Number(b.remain_qty || 0).toLocaleString()}</td>
+                        <td className="tabular-nums text-slate-500">¥{money(b.unit_cost)}</td>
+                        <td className="tabular-nums font-semibold">¥{money(Number(b.remain_qty || 0) * Number(b.unit_cost || 0))}</td>
+                        <td className="whitespace-nowrap"><span className={`px-1.5 py-0.5 rounded text-[10px] ${b.status === '在库' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>{b.status}</span></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="text-[10px] text-slate-400 mt-3">处理建议：优先安排先进先出领用、促销清仓或评估计提减值；冻结批次请先走质量异常流程解冻。</p>
+            </div>
+          )}
         </div>
       )}
     </div>
